@@ -105,11 +105,11 @@ def run_benchmark():
         fig, ax = plt.subplots(figsize=(10, 6))
         
         # Biểu đồ chỉ còn 2 stack: Parallel Fetch và Rehydration
-        p1 = ax.bar(x, parallel_fetch_times, width, label='Parallel Fetch (Max of Sites)', color='#3498db')
-        p2 = ax.bar(x, rehydration_times, width, bottom=parallel_fetch_times, label='Object Rehydration (Join)', color='#e74c3c')
+        p1 = ax.bar(x, parallel_fetch_times, width, label='Parallel Fetch (Max of Sites)')
+        p2 = ax.bar(x, rehydration_times, width, bottom=parallel_fetch_times, label='Object Rehydration (Join)')
         
         # Thêm đường tổng thời gian
-        ax.plot(x, total_times, color='black', marker='o', linestyle='-', linewidth=2, label='Total Response Time')
+        ax.plot(x, total_times, marker='o', linestyle='-', linewidth=2, label='Total Response Time')
         
         # Trang trí đồ thị
         ax.set_ylabel('Thời gian phản hồi trung bình (ms)')

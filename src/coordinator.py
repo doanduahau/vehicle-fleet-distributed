@@ -104,7 +104,9 @@ class Coordinator:
         # =================================================================
         # DISTRIBUTED SCHEMA REGISTRY (HỆ QUẢN TRỊ LƯỢC ĐỒ PHÂN TÁN)
         # =================================================================
-        self._registry_file = "schema_registry.json"
+        import os
+        os.makedirs("data", exist_ok=True)
+        self._registry_file = "data/schema_registry.json"
         self._load_schema_registry()
 
     def _load_schema_registry(self):

@@ -12,8 +12,7 @@ Vai trò của file:
 
 Dựa trên lý thuyết:
     Özsu & Valduriez "Principles of Distributed Database Systems" (4th Ed.)
-    - Chương 12: Object-Oriented Distributed Databases
-    - Mục 12.2: Object Identity in Distributed Systems (Vấn đề khủng hoảng danh tính và cách giải quyết)
+    - Object Identity in Distributed Systems (Vấn đề khủng hoảng danh tính và cách giải quyết)
 """
 
 import threading # Thư viện để khóa (Lock) luồng, chống lỗi khi có nhiều request tới cùng 1 lúc (Race condition)
@@ -32,7 +31,7 @@ class OID:
     """
     Đại diện cho Định danh Đối tượng (OID - Object ID) của hệ thống.
     
-    Cách thiết kế (Mục 12.2.3 - Structured OIDs):
+    Cách thiết kế (Structured OIDs):
     Thay vì dùng một chuỗi UUID ngẫu nhiên dài thòng (vừa tốn dung lượng vừa khó đọc), 
     hệ thống dùng "OID có cấu trúc" gồm 3 phần:
         <site_id>.<class_id>.<sequence_number>

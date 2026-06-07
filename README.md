@@ -71,7 +71,7 @@ docker compose start site1
 ```
 vehicle-fleet-distributed/
 ├── src/
-│   ├── oid_manager.py     # OID generation & registry (Özsu §12.2)
+│   ├── oid_manager.py     # OID generation & registry (Object Identity)
 │   ├── config.py          # Site topology — Docker-aware via env vars
 │   ├── models.py          # Vehicle / Truck / ElectricCar + serialization
 │   ├── site_server.py     # Flask HTTP server for each site
@@ -97,7 +97,7 @@ vehicle-fleet-distributed/
 | **Data isolation** | Shared `data/` folder | Separate named volumes per site |
 | **Reproducibility** | Depends on local Python env | Identical environment everywhere |
 
-Docker makes each "site" truly autonomous (Özsu §3.3), not just a different port on the same machine.
+Docker makes each "site" truly autonomous (Site Autonomy), not just a different port on the same machine.
 
 ---
 

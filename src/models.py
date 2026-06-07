@@ -13,9 +13,8 @@ Vai trò của file:
 
 Dựa trên lý thuyết:
     Özsu & Valduriez "Principles of Distributed Database Systems" (4th Ed.)
-    - Chương 12: Object-Oriented Distributed Databases (CSDL Phân tán Hướng đối tượng)
-    - Mục 12.1: The Object Model (Lớp, thuộc tính, kế thừa)
-    - Mục 12.4: Schema Evolution in Distributed OODBs (Tiến hóa lược đồ)
+    - The Object Model (Lớp, thuộc tính, kế thừa)
+    - Schema Evolution in Distributed OODBs (Tiến hóa lược đồ)
 """
 
 from __future__ import annotations
