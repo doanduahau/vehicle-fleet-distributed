@@ -230,22 +230,33 @@ class SiteServer:
                 return jsonify({"error": f"Không tìm thấy OID '{oid_str}' tại site {self.site_id}"}), 404
             return jsonify(obj_data)
 
-        @app.route("/query", methods=["GET"])
+        @app.route("/query", methods=["GET", "POST"])
         def query():
             """
             Lọc (Filter) tìm kiếm xe. 
             Mô phỏng "Mệnh đề WHERE" (Selection) trong CSDL Quan hệ.
+            Hỗ trợ POST để truyền mảng OIDs phục vụ Semi-Join.
             """
-            # Đọc các tham số tìm kiếm từ URL
+            # Đọc các tham số tìm kiếm
             field = request.args.get("field")
             value = request.args.get("value")
             year_min = request.args.get("year_min", type=int)
             year_max = request.args.get("year_max", type=int)
+            
+            target_oids = None
+            if request.method == "POST":
+                data = request.get_json(silent=True) or {}
+                if "oids" in data:
+                    target_oids = set(data["oids"])
 
             results = []
             # Quét vòng lặp toàn bộ dữ liệu trên RAM để tìm
             for obj_data in self.objects.values():
                 match = True
+                
+                if target_oids and str(obj_data.get("oid")) not in target_oids:
+                    match = False
+                    
                 if field and value:
                     obj_val = str(obj_data.get(field, ""))
                     if obj_val.lower() != value.lower():

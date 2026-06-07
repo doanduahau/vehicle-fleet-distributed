@@ -178,6 +178,7 @@ class Coordinator:
         year_min: Optional[int] = None,
         year_max: Optional[int] = None,
         limit: Optional[int] = None,
+        oids: Optional[List[str]] = None,
     ) -> Tuple[int, List[Dict], float, Optional[str]]:
         """
         Hành động: Gửi mạng HTTP tới 1 máy chủ cụ thể để lấy dữ liệu.
@@ -195,13 +196,17 @@ class Coordinator:
             if value: params["value"] = value
             if year_min: params["year_min"] = year_min
             if year_max: params["year_max"] = year_max
+            if limit: params["limit"] = limit
 
-            url = self._site_url(site_id, "/query") if params else self._site_url(site_id, "/objects")
-
-            print(f"  [NETWORK LOG] Gửi request tới Site {site_id} ({url}) với TTL={site_timeout}s")
+            if oids is not None:
+                url = self._site_url(site_id, "/query")
+                print(f"  [NETWORK LOG] Gửi POST request tới Site {site_id} ({url}) với {len(oids)} OIDs (Semi-Join)")
+                resp = self._session.post(url, json={"oids": oids}, params=params, timeout=site_timeout)
+            else:
+                url = self._site_url(site_id, "/query") if params else self._site_url(site_id, "/objects")
+                print(f"  [NETWORK LOG] Gửi GET request tới Site {site_id} ({url}) với TTL={site_timeout}s")
+                resp = self._session.get(url, params=params, timeout=site_timeout)
             
-            # 🚀 Lệnh cốt lõi: Gửi Request lấy dữ liệu
-            resp = self._session.get(url, params=params, timeout=site_timeout)
             data = resp.json()
             
             elapsed = time.perf_counter() - t0 # Dừng đồng hồ
@@ -255,32 +260,64 @@ class Coordinator:
         print(f"\n[Coordinator] Đang bắt đầu Tìm kiếm Đa hình (Polymorphic Search)")
         print(f"  Bộ lọc: field={field!r}, value={value!r}, year_min={year_min}, year_max={year_max}")
         print(f"  Các Site truy vấn: {sites_to_query}")
-        print(f"  Chiến lược: Tỏa nhánh SONG SONG (giảm tổng độ trễ xuống bằng max độ trễ mỗi site)\n")
 
-        # ------------------------------------------------------------------
-        # BƯỚC 1: TỎA NHÁNH SONG SONG (Parallel Fan-out Execution)
-        # Thay vì đợi Site 0 lấy xong mới gọi Site 1, ta mở 3 luồng (Thread) gọi 3 Site CÙNG LÚC.
-        # ------------------------------------------------------------------
         site_data: Dict[int, List[Dict]] = {}
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(sites_to_query)) as executor:
-            # Phóng các luồng đi...
-            futures = {
-                executor.submit(self._fetch_from_site, sid, field, value, year_min, year_max, None): sid
-                for sid in sites_to_query
-            }
-            # Thu gom kết quả khi các luồng trả về
-            for future in concurrent.futures.as_completed(futures):
-                sid, objects, elapsed, error = future.result()
-                result.timing[sid] = elapsed
-                if error:
-                    # Ghi nhận lỗi nếu site bị tèo
-                    result.errors[sid] = error
-                    print(f"  [WARN] Site {sid} ({self.sites[sid]['name']}): {error} [{elapsed:.3f}s]")
-                else:
-                    # Ghi nhận dữ liệu thành công
-                    site_data[sid] = objects
-                    print(f"  [OK]   Site {sid} ({self.sites[sid]['name']}): {len(objects)} đối tượng [{elapsed:.3f}s]")
+        if limit and 0 in sites_to_query:
+            print(f"  Chiến lược: Bán kết nối (Semi-Join) do có điều kiện LIMIT={limit}\n")
+            
+            # BƯỚC 1: Lấy dữ liệu cơ sở (Base Fragments) từ Site 0
+            sid, objects, elapsed, error = self._fetch_from_site(0, field, value, year_min, year_max, limit=limit)
+            result.timing[0] = elapsed
+            if error:
+                result.errors[0] = error
+                print(f"  [WARN] Site 0: {error}")
+            else:
+                site_data[0] = objects
+                target_oids = [obj.get("oid") for obj in objects if "oid" in obj]
+                print(f"  [OK]   Site 0 (Driver): Tìm thấy {len(target_oids)} OIDs gốc [{elapsed:.3f}s]")
+                
+                # BƯỚC 2: Fetch song song từ Site 1 và 2, nhưng CHỈ LẤY CÁC OID đã khớp
+                other_sites = [s for s in sites_to_query if s != 0]
+                if target_oids and other_sites:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=len(other_sites)) as executor:
+                        futures = {
+                            executor.submit(self._fetch_from_site, sid, None, None, None, None, None, target_oids): sid
+                            for sid in other_sites
+                        }
+                        for future in concurrent.futures.as_completed(futures):
+                            sid, obj_list, elap, err = future.result()
+                            result.timing[sid] = elap
+                            if err:
+                                result.errors[sid] = err
+                                print(f"  [WARN] Site {sid}: {err} [{elap:.3f}s]")
+                            else:
+                                site_data[sid] = obj_list
+                                print(f"  [OK]   Site {sid}: Lấy {len(obj_list)} mảnh mở rộng [{elap:.3f}s]")
+        else:
+            print(f"  Chiến lược: Tỏa nhánh SONG SONG (Parallel Fan-out) vì không có LIMIT\n")
+            
+            # ------------------------------------------------------------------
+            # BƯỚC 1: TỎA NHÁNH SONG SONG (Parallel Fan-out Execution)
+            # ------------------------------------------------------------------
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(sites_to_query)) as executor:
+                # Phóng các luồng đi...
+                futures = {
+                    executor.submit(self._fetch_from_site, sid, field, value, year_min, year_max, None): sid
+                    for sid in sites_to_query
+                }
+                # Thu gom kết quả khi các luồng trả về
+                for future in concurrent.futures.as_completed(futures):
+                    sid, objects, elapsed, error = future.result()
+                    result.timing[sid] = elapsed
+                    if error:
+                        # Ghi nhận lỗi nếu site bị tèo
+                        result.errors[sid] = error
+                        print(f"  [WARN] Site {sid} ({self.sites[sid]['name']}): {error} [{elapsed:.3f}s]")
+                    else:
+                        # Ghi nhận dữ liệu thành công
+                        site_data[sid] = objects
+                        print(f"  [OK]   Site {sid} ({self.sites[sid]['name']}): {len(objects)} đối tượng [{elapsed:.3f}s]")
 
         # ------------------------------------------------------------------
         # BƯỚC 2: HỢP NHẤT VÀ PHỤC HỒI (Merge & Rehydrate)
