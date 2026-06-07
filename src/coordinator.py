@@ -195,7 +195,6 @@ class Coordinator:
             if value: params["value"] = value
             if year_min: params["year_min"] = year_min
             if year_max: params["year_max"] = year_max
-            if limit: params["limit"] = limit
 
             url = self._site_url(site_id, "/query") if params else self._site_url(site_id, "/objects")
 
@@ -267,7 +266,7 @@ class Coordinator:
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(sites_to_query)) as executor:
             # Phóng các luồng đi...
             futures = {
-                executor.submit(self._fetch_from_site, sid, field, value, year_min, year_max, limit): sid
+                executor.submit(self._fetch_from_site, sid, field, value, year_min, year_max, None): sid
                 for sid in sites_to_query
             }
             # Thu gom kết quả khi các luồng trả về
@@ -328,6 +327,9 @@ class Coordinator:
                         result.objects.append(obj)
                     except Exception:
                         pass
+
+        if limit and limit > 0:
+            result.objects = result.objects[:limit]
 
         result.total_time = time.perf_counter() - t_start
         return result
