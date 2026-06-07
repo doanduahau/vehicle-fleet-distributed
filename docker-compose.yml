@@ -1,0 +1,202 @@
+# =============================================================================
+# Vehicle Fleet Distributed Database — Docker Compose
+# =============================================================================
+# Mô phỏng 3 sites vật lý độc lập trên cùng máy host.
+#
+# Lý do dùng Docker (Özsu & Valduriez §3.3 — Site Autonomy):
+#   - Mỗi container có network namespace riêng → sites thực sự cô lập
+#   - Giao tiếp qua tên service DNS (site0, site1, site2) thay vì localhost
+#   - Dữ liệu mỗi site trong volume riêng → local autonomy
+#   - Có thể kill từng container để demo site failure thực tế
+#
+# Cách chạy:
+#   docker compose up --build          # Khởi động cả 3 sites
+#   docker compose up --build -d       # Chạy nền (detached)
+#   docker compose exec site0 bash     # SSH vào Site 0
+#   docker compose stop site1          # Kill Site 1 (demo failure)
+#   docker compose down -v             # Dừng và xóa volumes
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Site 0: Vehicle (Superclass) — Coordinator
+  # ---------------------------------------------------------------------------
+  site0:
+    build: .
+    container_name: vf_site0
+    environment:
+      SITE_ID: "0"
+      FLASK_HOST: "0.0.0.0"
+      SITE0_HOST: "site0"
+      SITE1_HOST: "site1"
+      SITE2_HOST: "site2"
+      DB_URI_0: "postgresql://user:password@pg_site0:5432/site0_db"
+    ports:
+      - "5000:5000"          # Host:Container — truy cập từ ngoài
+    depends_on:
+      pg_site0:
+        condition: service_healthy
+    networks:
+      - fleet_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/ping', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  pg_site0:
+    image: postgres:15-alpine
+    container_name: pg_site0
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: site0_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg0_data:/var/lib/postgresql/data
+    networks:
+      - fleet_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d site0_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Site 1: Truck (Subclass) — Depot A
+  # ---------------------------------------------------------------------------
+  site1:
+    build: .
+    container_name: vf_site1
+    environment:
+      SITE_ID: "1"
+      FLASK_HOST: "0.0.0.0"
+      DB_URI_1: "postgresql://user:password@pg_site1:5432/site1_db"
+    ports:
+      - "5001:5001"
+    depends_on:
+      site0:
+        condition: service_healthy
+      pg_site1:
+        condition: service_healthy
+    networks:
+      - fleet_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5001/ping', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  pg_site1:
+    image: postgres:15-alpine
+    container_name: pg_site1
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: site1_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg1_data:/var/lib/postgresql/data
+    networks:
+      - fleet_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d site1_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Site 2: ElectricCar (Subclass) — EV Hub
+  # ---------------------------------------------------------------------------
+  site2:
+    build: .
+    container_name: vf_site2
+    environment:
+      SITE_ID: "2"
+      FLASK_HOST: "0.0.0.0"
+      DB_URI_2: "postgresql://user:password@pg_site2:5432/site2_db"
+    ports:
+      - "5002:5002"
+    depends_on:
+      site0:
+        condition: service_healthy
+      pg_site2:
+        condition: service_healthy
+    networks:
+      - fleet_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5002/ping', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  pg_site2:
+    image: postgres:15-alpine
+    container_name: pg_site2
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: site2_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - pg2_data:/var/lib/postgresql/data
+    networks:
+      - fleet_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d site2_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Seeder: chạy một lần để populate dữ liệu vào tất cả sites
+  # ---------------------------------------------------------------------------
+  seeder:
+    build: .
+    container_name: vf_seeder
+    environment:
+      SITE0_HOST: "site0"
+      SITE1_HOST: "site1"
+      SITE2_HOST: "site2"
+    command: ["python", "setup/seed_data.py"]
+    networks:
+      - fleet_net
+    depends_on:
+      site0:
+        condition: service_healthy
+      site1:
+        condition: service_healthy
+      site2:
+        condition: service_healthy
+    restart: "no"           # Chạy một lần rồi thoát
+    profiles:
+      - seed               # Chỉ chạy khi gọi: docker compose --profile seed up
+
+# =============================================================================
+# Volumes: mỗi site có persistent storage riêng (local autonomy)
+# =============================================================================
+volumes:
+  pg0_data:
+  pg1_data:
+  pg2_data:
+
+# =============================================================================
+# Network: tất cả sites trong cùng fleet_net
+# Các containers giao tiếp qua service name (DNS resolution tự động)
+# =============================================================================
+networks:
+  fleet_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
