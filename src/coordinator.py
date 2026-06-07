@@ -101,6 +101,13 @@ class Coordinator:
         self._session = requests.Session()
         self._session.headers.update({"Content-Type": "application/json"})
 
+        # =================================================================
+        # DISTRIBUTED SCHEMA REGISTRY (HỆ QUẢN TRỊ LƯỢC ĐỒ PHÂN TÁN)
+        # =================================================================
+        self.global_schema_version = "1.0.0"
+        self.schema_changelog = []  # Lưu lịch sử các lần tiến hóa (Event Sourcing)
+        self.pending_schemas = {site_id: [] for site_id in self.sites}  # Hàng đợi Offline Catch-up
+
     def _site_url(self, site_id: int, path: str) -> str:
         """Hàm tiện ích ghép Host và Port thành URL đầy đủ (Ví dụ: http://site1:5001/query)"""
         cfg = self.sites[site_id]
@@ -200,6 +207,9 @@ class Coordinator:
         """
         Nhiệm vụ: Cùng một lúc gọi tới cả 3 máy chủ, lượm lặt dữ liệu, khâu chúng lại, trả về danh sách cuối.
         """
+        # Đồng bộ Schema Eventual Consistency trước khi query
+        self.sync_pending_schemas()
+
         t_start = time.perf_counter()
         result = QueryResult()
         
@@ -323,121 +333,104 @@ class Coordinator:
             print(f"  [FAIL] Lỗi chèn: {exc}")
             return None
 
+    def sync_pending_schemas(self):
+        """Hàm đồng bộ Lược đồ cho các Site vừa online trở lại (Catch-up / Eventual Consistency)."""
+        import time
+        for site_id, updates in self.pending_schemas.items():
+            if not updates:
+                continue
+                
+            # Thử ping xem site đã sống lại chưa
+            is_alive, _ = self._ping_site(site_id)
+            if not is_alive:
+                continue
+                
+            print(f"\n[Eventual Consistency] Site {site_id} ĐÃ ONLINE! Đang đồng bộ {len(updates)} lược đồ còn thiếu...")
+            successful_updates = []
+            
+            for update in updates:
+                try:
+                    site_timeout = self.sites[site_id].get("timeout", 2.0)
+                    resp = self._session.post(
+                        self._site_url(site_id, "/schema_evolve"),
+                        json=update,
+                        timeout=site_timeout,
+                    )
+                    resp.raise_for_status()
+                    print(f"  -> Đã đồng bộ '{update['attribute']}' cho Site {site_id} thành công.")
+                    successful_updates.append(update)
+                except Exception as exc:
+                    print(f"  -> LỖI đồng bộ '{update['attribute']}' cho Site {site_id}: {exc}")
+                    break  # Dừng lại nếu lỗi, để lần sau thử tiếp
+            
+            # Xóa các update đã thành công khỏi hàng đợi
+            for u in successful_updates:
+                self.pending_schemas[site_id].remove(u)
+
     def schema_evolve(self, attribute: str, default_value: Any, new_version: str) -> Dict[str, Any]:
         """
-        Tiến hóa Lược đồ theo Giao thức 2-Phase Commit (2PC).
-        Dựa trên lý thuyết: Özsu & Valduriez §19.2 — Distributed Commit Protocols
-
-        PHASE 1 — PREPARE (Chuẩn bị):
-            Coordinator gửi lệnh tới TẤT CẢ các Site để hỏi bỏ phiếu.
-            Mỗi Site trả lời READY (sẵn sàng) hoặc NOT_READY (từ chối/lỗi/timeout).
-
-        PHASE 2a — COMMIT (Xác nhận - nếu tất cả READY):
-            Coordinator phát lệnh COMMIT đến tất cả Sites.
-            Từng Site áp dụng thay đổi thật sự và ghi xuống Ổ cứng.
-
-        PHASE 2b — ROLLBACK (Hủy bỏ - nếu có bất kỳ FAIL nào):
-            Coordinator phát lệnh ROLLBACK đến tất cả Sites đã sẵn sàng.
-            Mỗi Site hủy bỏ thay đổi, giữ nguyên CSDL như trước.
+        Tiến hóa Lược đồ theo mô hình Eventual Consistency (Nhất quán cuối cùng) 
+        và Timestamp-based Conflict Resolution (Kiểm soát đồng thời).
         """
-        import uuid
-        # Mỗi giao dịch có một mã định danh duy nhất (Transaction ID)
-        txn_id = str(uuid.uuid4())[:8]
-
-        print(f"\n[2PC] ====== BẮT ĐẦU GIAO DỊCH {txn_id} ======")
-        print(f"[2PC] Thuộc tính: '{attribute}' = {default_value!r} -> v{new_version}")
-
-        payload = {
-            "txn_id":      txn_id,
-            "attribute":   attribute,
-            "default":     default_value,
+        import time
+        
+        # 1. CONFLICT RESOLUTION (Chống đụng độ)
+        # Giả lập: Nếu người dùng nhập version <= version hiện tại -> Từ chối!
+        # Đây là cách Coordinator ngăn chặn 2 Admin cập nhật đè lên nhau.
+        try:
+            current_v = float(self.global_schema_version.replace("v", "").replace(".", ""))
+            new_v = float(new_version.replace("v", "").replace(".", ""))
+            if new_v <= current_v:
+                return {
+                    "error": f"Conflict Detected! Phiên bản yêu cầu ({new_version}) phải lớn hơn phiên bản hiện tại ({self.global_schema_version})"
+                }
+        except ValueError:
+            pass # Bỏ qua nếu version không phải dạng số (vd: v1.x)
+            
+        # Cập nhật Global Schema Registry
+        self.global_schema_version = new_version
+        update_payload = {
+            "attribute": attribute,
+            "default": default_value,
             "new_version": new_version,
+            "timestamp": time.time()
         }
+        self.schema_changelog.append(update_payload)
+        
+        print(f"\n[Global Schema Registry] Đã nâng cấp Lược đồ lên v{new_version}.")
+        print(f"  Thuộc tính mới: '{attribute}' = {default_value!r}")
+        
+        # Thêm vào hàng đợi Pending của TẤT CẢ các site
+        for site_id in self.sites:
+            self.pending_schemas[site_id].append(update_payload)
 
-        # ================================================================
-        # PHASE 1: PREPARE — Hỏi phiếu từ tất cả Sites
-        # ================================================================
-        print(f"\n[2PC][PHASE 1] PREPARE — Đang hỏi phiếu từ {len(self.sites)} sites...")
-        votes = {}   # {site_id: "READY" | "NOT_READY"}
-
+        # 2. EVENTUAL CONSISTENCY PROPAGATION
+        # Gửi lập tức đến các site đang sống
+        results = {"decision": "EVENTUAL_CONSISTENCY", "sites": {}}
+        
         for site_id in self.sites:
             try:
                 site_timeout = self.sites[site_id].get("timeout", 2.0)
                 resp = self._session.post(
-                    self._site_url(site_id, "/2pc/prepare"),
-                    json=payload,
+                    self._site_url(site_id, "/schema_evolve"),
+                    json=update_payload,
                     timeout=site_timeout,
                 )
-                result = resp.json()
-                vote = result.get("vote", "NOT_READY")
-                votes[site_id] = vote
-                print(f"  Site {site_id}: {vote}")
+                results["sites"][site_id] = resp.json()
+                # Xóa khỏi hàng đợi vì đã update thành công
+                self.pending_schemas[site_id].remove(update_payload)
+                print(f"  [OK] Site {site_id} cập nhật thành công.")
             except Exception as exc:
-                # Timeout hoặc đứt mạng => tự động bỏ phiếu NOT_READY
-                votes[site_id] = "NOT_READY"
-                print(f"  Site {site_id}: NOT_READY (Lỗi mạng: {exc})")
-
-        # ================================================================
-        # KIỂM TRA KẾT QUẢ BỎ PHIẾU
-        # ================================================================
-        all_ready = all(v == "READY" for v in votes.values())
-
-        if all_ready:
-            # ============================================================
-            # PHASE 2a: COMMIT — Tất cả đồng thuận, tiến hành xác nhận
-            # ============================================================
-            print(f"\n[2PC][PHASE 2] COMMIT — Tất cả {len(self.sites)} sites đồng thuận!")
-            results = {"txn_id": txn_id, "decision": "COMMIT", "sites": {}}
-
-            for site_id in self.sites:
-                try:
-                    site_timeout = self.sites[site_id].get("timeout", 2.0)
-                    resp = self._session.post(
-                        self._site_url(site_id, "/2pc/commit"),
-                        json={"txn_id": txn_id},
-                        timeout=site_timeout,
-                    )
-                    results["sites"][site_id] = resp.json()
-                    updated = results["sites"][site_id].get("objects_updated", 0)
-                    print(f"  Site {site_id}: COMMITTED ({updated} objects cập nhật)")
-                except Exception as exc:
-                    results["sites"][site_id] = {"error": str(exc)}
-                    print(f"  Site {site_id}: LỖI KHI COMMIT ({exc})")
-
-            print(f"[2PC] ====== GIAO DỊCH {txn_id} THÀNH CÔNG ======\n")
-
-        else:
-            # ============================================================
-            # PHASE 2b: ROLLBACK — Có site từ chối, hủy toàn bộ giao dịch
-            # ============================================================
-            failed = [sid for sid, v in votes.items() if v != "READY"]
-            print(f"\n[2PC][PHASE 2] ROLLBACK — Site {failed} từ chối/offline!")
-            print(f"[2PC]          => Hủy toàn bộ giao dịch để đảm bảo tính Nhất quán.")
-            results = {"txn_id": txn_id, "decision": "ROLLBACK",
-                       "reason": f"Site {failed} không phản hồi", "sites": {}}
-
-            # Chỉ cần rollback những Site đã READY (các site FAIL chưa làm gì)
-            ready_sites = [sid for sid, v in votes.items() if v == "READY"]
-            for site_id in ready_sites:
-                try:
-                    site_timeout = self.sites[site_id].get("timeout", 2.0)
-                    resp = self._session.post(
-                        self._site_url(site_id, "/2pc/rollback"),
-                        json={"txn_id": txn_id},
-                        timeout=site_timeout,
-                    )
-                    results["sites"][site_id] = resp.json()
-                    print(f"  Site {site_id}: ROLLED BACK thành công")
-                except Exception as exc:
-                    results["sites"][site_id] = {"error": str(exc)}
-                    print(f"  Site {site_id}: LỖI KHI ROLLBACK ({exc})")
-
-            print(f"[2PC] ====== GIAO DỊCH {txn_id} BỊ HỦY (ABORTED) ======\n")
-
+                results["sites"][site_id] = {"error": str(exc), "status": "PENDING"}
+                print(f"  [OFFLINE] Site {site_id} không phản hồi. Đã đưa vào Hàng đợi Catch-up.")
+        
         return results
 
     def get_site_stats(self) -> Dict[int, Any]:
         """Hàm lấy thống kê từ các site."""
+        # Đồng bộ Schema Eventual Consistency
+        self.sync_pending_schemas()
+        
         stats = {}
         for site_id in self.sites:
             try:

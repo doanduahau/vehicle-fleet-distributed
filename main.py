@@ -51,8 +51,9 @@ MENU = """
   [3] Tìm kiếm Đa hình -- Lọc theo hãng sản xuất (make)
   [4] Tìm kiếm Đa hình -- Lọc theo khoảng năm sản xuất
   [5] Chứng minh chi phí Phục hồi Đối tượng (Rehydration Overhead)
-  [6] Tiến hóa Lược đồ (Schema Evolution) -- Thêm thuộc tính mới
-  [7] Khảo sát Hệ thống qua Master Node (Xem thống kê)
+  [6] Chạy Benchmark hiệu năng & Xuất biểu đồ (Performance Graph)
+  [7] Tiến hóa Lược đồ (Schema Evolution) -- Thêm thuộc tính mới
+  [8] Khảo sát Hệ thống qua Master Node (Xem thống kê)
   [0] Thoát
 ---------------------------------------------
 """
@@ -207,6 +208,18 @@ def demo_rehydration_cost():
     print("   Trong môi trường Internet/Cloud thực tế, con số này có thể từ 10-50ms)")
 
 
+def demo_benchmark():
+    """
+    Chức năng 6: Gọi script benchmark.py để chạy test và xuất biểu đồ matplotlib.
+    """
+    try:
+        import benchmark
+        benchmark.run_benchmark()
+    except ImportError:
+        print("  [LỖI] Không tìm thấy file benchmark.py hoặc chưa cài matplotlib.")
+        print("  Hãy chạy lệnh: pip install matplotlib")
+
+
 def demo_schema_evolution():
     """
     Chức năng 6: Tiến hóa Lược đồ (Schema Evolution) - Thêm thuộc tính lúc runtime (đang chạy).
@@ -261,8 +274,9 @@ def main():
         "3": demo_polymorphic_filter,
         "4": demo_polymorphic_year,
         "5": demo_rehydration_cost,
-        "6": demo_schema_evolution,
-        "7": demo_oid_stats,
+        "6": demo_benchmark,
+        "7": demo_schema_evolution,
+        "8": demo_oid_stats,
     }
 
     # Vòng lặp chương trình
