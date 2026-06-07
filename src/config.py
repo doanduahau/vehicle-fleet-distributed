@@ -13,7 +13,7 @@ Vai trò của file:
 
 Dựa trên lý thuyết: 
     Ozsu & Valduriez "Principles of Distributed Database Systems" (4th Ed.)
-    - Chương 4: Distributed Database Design (Kỹ thuật phân mảnh dọc - Vertical Fragmentation).
+    - Chương: Distributed Database Design (Kỹ thuật phân mảnh dọc - Vertical Fragmentation).
 """
 
 import os # Thư viện chuẩn của Python dùng để tương tác với Hệ điều hành (đọc biến môi trường)

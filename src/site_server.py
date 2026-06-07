@@ -61,13 +61,6 @@ class SiteServer:
         # Theo dõi lịch sử tiến hóa lược đồ (Để biết CSDL đã được thêm cột gì, lúc nào)
         self._schema_history: List[Dict] = []
 
-        # ---------------------------------------------------------------
-        # VÙNG NHỚ TẠM CỦA GIAO THỨC 2PC (Two-Phase Commit)
-        # Khi Coordinator phát lệnh PREPARE, dữ liệu thay đổi sẽ
-        # được lưu tạm ở đây TRƯỚC KHI được ghi vào CSDL thực sự.
-        # Chỉ khi nhận được lệnh COMMIT thì mới ghi xuống đĩa.
-        # ---------------------------------------------------------------
-        self._pending_2pc: Dict[str, Any] = {}  # {txn_id: {attr, default, version, snapshot}}
 
         # Khởi tạo Web Server (Flask)
         self.app = Flask(f"site_{site_id}")
@@ -217,11 +210,16 @@ class SiteServer:
         @app.route("/objects", methods=["GET"])
         def get_all_objects():
             """Trả về toàn bộ dữ liệu có trong máy này (Không có bộ lọc)."""
+            limit = request.args.get("limit", type=int)
+            objects_list = list(self.objects.values())
+            if limit and limit > 0:
+                objects_list = objects_list[:limit]
+                
             return jsonify({
                 "site_id": self.site_id,
                 "class": self.class_name,
-                "objects": list(self.objects.values()),
-                "count": len(self.objects),
+                "objects": objects_list,
+                "count": len(objects_list),
             })
 
         @app.route("/object/<path:oid_str>", methods=["GET"])
@@ -260,6 +258,10 @@ class SiteServer:
                 # Nếu thỏa mãn mọi điều kiện thì nhét vào mảng kết quả
                 if match:
                     results.append(obj_data)
+                    
+            limit = request.args.get("limit", type=int)
+            if limit and limit > 0:
+                results = results[:limit]
 
             return jsonify({
                 "site_id": self.site_id,
@@ -310,128 +312,7 @@ class SiteServer:
                 "new_schema_version": new_version,
             })
 
-        # ==============================================================
-        # GIAO THỨC 2-PHASE COMMIT (2PC) CHO TIẾN HÓA LƯỢC ĐỒ
-        # ==============================================================
-        # Lý thuyết: Özsu & Valduriez §19.2 — Distributed Commit Protocols
-        #
-        # LUỒNG HOẠT ĐỘNG:
-        #   PHASE 1 (Prepare): Coordinator hỏi "Bạn có sẵn sàng không?"
-        #     -> Site kiểm tra tài nguyên, tạo snapshot dự phòng, trả lời READY.
-        #   PHASE 2a (Commit): Nếu TẤT CẢ trả lời READY:
-        #     -> Coordinator ra lệnh COMMIT, Site áp dụng thay đổi thật sự.
-        #   PHASE 2b (Rollback): Nếu BẤT KỲ Site nào FAIL/Timeout:
-        #     -> Coordinator ra lệnh ROLLBACK, Site xóa snapshot và quay về trạng thái cũ.
-        # ==============================================================
 
-        @app.route("/2pc/prepare", methods=["POST"])
-        def prepare_2pc():
-            """
-            PHASE 1 (Bỏ phiếu): Coordinator hỏi Site "Bạn có sẵn sàng cập nhật Schema không?"
-            Site KHÔNG ghi dữ liệu thật ngay — nó chỉ:
-              1. Kiểm tra mình đang còn khỏe mạnh.
-              2. Lưu lệnh thay đổi vào vùng nhớ tạm (_pending_2pc).
-              3. Trả lời READY.
-            """
-            data = request.get_json(force=True)
-            txn_id    = data.get("txn_id")        # Mã giao dịch duy nhất do Coordinator cấp
-            attr_name = data.get("attribute")
-            default_v = data.get("default")
-            new_ver   = data.get("new_version", SCHEMA_VERSION)
-
-            if not txn_id or not attr_name:
-                return jsonify({"vote": "NOT_READY", "reason": "Thiếu txn_id hoặc attribute"}), 400
-
-            if txn_id in self._pending_2pc:
-                return jsonify({"vote": "NOT_READY", "reason": f"Giao dịch {txn_id} đang chờ xử lý"}), 409
-
-            # Lưu lệnh vào vùng nhớ đệm 2PC (Chưa ghi xuống CSDL)
-            self._pending_2pc[txn_id] = {
-                "attribute":   attr_name,
-                "default":     default_v,
-                "new_version": new_ver,
-                # Tạo SNAPSHOT: Lưu lại trạng thái hiện tại của toàn bộ objects
-                # để có thể ROLLBACK về trạng thái này nếu cần
-                "snapshot": {
-                    oid: dict(obj) for oid, obj in self.objects.items()
-                    if attr_name not in obj  # Chỉ snapshot các xe CHƯA có thuộc tính này
-                },
-            }
-
-            print(f"[2PC][Site {self.site_id}] PREPARE txn={txn_id} | attr='{attr_name}' -> READY")
-            return jsonify({"vote": "READY", "site_id": self.site_id, "txn_id": txn_id})
-
-        @app.route("/2pc/commit", methods=["POST"])
-        def commit_2pc():
-            """
-            PHASE 2a (Xác nhận): Coordinator ra lệnh COMMIT.
-            Bây giờ Site mới thực sự ÁP DỤNG thay đổi lên RAM và ghi xuống Ổ cứng.
-            Sau khi commit xong, xóa snapshot khỏi vùng nhớ tạm.
-            """
-            data   = request.get_json(force=True)
-            txn_id = data.get("txn_id")
-
-            if txn_id not in self._pending_2pc:
-                return jsonify({"error": f"Không tìm thấy giao dịch {txn_id}"}), 404
-
-            pending = self._pending_2pc[txn_id]
-            attr_name = pending["attribute"]
-            default_v = pending["default"]
-            new_ver   = pending["new_version"]
-
-            # ÁP DỤNG THAY ĐỔI THẬT SỰ vào RAM
-            updated = 0
-            for obj_data in self.objects.values():
-                if attr_name not in obj_data:
-                    obj_data[attr_name]      = default_v
-                    obj_data["schema_version"] = new_ver
-                    updated += 1
-
-            # Ghi lịch sử
-            self._schema_history.append({
-                "action": "add_attribute",
-                "attribute": attr_name,
-                "default":   default_v,
-                "new_version": new_ver,
-                "objects_updated": updated,
-                "timestamp": time.time(),
-                "protocol": "2PC",
-            })
-
-            # Ghi đè xuống PostgreSQL
-            self._save_to_db()
-
-            # Xóa snapshot khỏi bộ nhớ tạm
-            del self._pending_2pc[txn_id]
-
-            print(f"[2PC][Site {self.site_id}] COMMIT txn={txn_id} | {updated} objects updated")
-            return jsonify({
-                "site_id":        self.site_id,
-                "status":         "COMMITTED",
-                "txn_id":         txn_id,
-                "attribute_added": attr_name,
-                "objects_updated": updated,
-            })
-
-        @app.route("/2pc/rollback", methods=["POST"])
-        def rollback_2pc():
-            """
-            PHASE 2b (Hủy bỏ): Coordinator ra lệnh ROLLBACK.
-            Site xóa thông tin trong vùng nhớ tạm, KHÔNG ghi gì xuống CSDL.
-            Trạng thái CSDL giữ nguyên như trước khi PREPARE.
-            """
-            data   = request.get_json(force=True)
-            txn_id = data.get("txn_id")
-
-            if txn_id not in self._pending_2pc:
-                # Idempotent: Giao dịch không tồn tại -> coi như đã rollback rồi
-                return jsonify({"status": "ROLLED_BACK", "note": "Không tìm thấy giao dịch, bỏ qua"})
-
-            # Xóa snapshot, KHÔNG làm gì thêm
-            del self._pending_2pc[txn_id]
-
-            print(f"[2PC][Site {self.site_id}] ROLLBACK txn={txn_id} -> Đã khôi phục")
-            return jsonify({"site_id": self.site_id, "status": "ROLLED_BACK", "txn_id": txn_id})
 
         @app.route("/stats", methods=["GET"])
         def stats():

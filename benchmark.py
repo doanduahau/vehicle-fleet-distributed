@@ -1,6 +1,7 @@
 import sys
 import time
 import requests
+import csv
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -16,62 +17,87 @@ def run_benchmark():
     print("=" * 65)
     
     # Số lượng bản ghi để benchmark (thay đổi linh hoạt tùy CSDL)
-    # Vì dữ liệu mẫu là 1500, ta sẽ dùng các mốc: 10, 50, 100, 500, 1000, 1500
     object_counts = [10, 50, 100, 500, 1000, 1500]
+    num_runs = 5
     
     local_fetch_times = []
     network_latency_times = []
     rehydration_times = []
     total_times = []
     
+    csv_data = []
+    csv_headers = ["Object Count", "Local Fetch (ms)", "Network Latency (ms)", "Rehydration (ms)", "Total Time (ms)"]
+    
     for count in object_counts:
-        print(f"\n[Mốc {count} đối tượng] Đang gửi truy vấn...")
+        print(f"\n[Mốc {count} đối tượng] Đang gửi truy vấn {num_runs} lần để lấy trung bình...")
         
-        # Gọi API với limit
-        # Lưu ý: Hàm global search hiện tại không nhận limit trực tiếp vào DB,
-        # nhưng chúng ta có thể truyền limit vào API để giới hạn kết quả phân tích.
-        # Để chính xác, ta gọi trực tiếp API /global/search
-        try:
-            start_time = time.time()
-            # Giả lập truy vấn Đa hình
-            resp = requests.get(f"http://127.0.0.1:5000/global/search?limit={count}", timeout=30.0)
-            end_time = time.time()
+        avg_t_local = 0.0
+        avg_t_network = 0.0
+        avg_t_rehydration = 0.0
+        avg_t_total = 0.0
+        success_count = 0
+        
+        for run in range(num_runs):
+            try:
+                start_time = time.time()
+                resp = requests.get(f"http://127.0.0.1:5000/global/search?limit={count}", timeout=30.0)
+                end_time = time.time()
+                
+                data = resp.json()
+                timing = data.get("timing", {})
+                
+                t_local = timing.get("0", 0.0)
+                t_remote_1 = timing.get("1", 0.0)
+                t_remote_2 = timing.get("2", 0.0)
+                t_network = max(t_remote_1, t_remote_2)
+                t_total = data.get("total_time", end_time - start_time)
+                t_rehydration = max(0, t_total - max(t_local, t_network))
+                
+                avg_t_local += t_local
+                avg_t_network += t_network
+                avg_t_rehydration += t_rehydration
+                avg_t_total += t_total
+                success_count += 1
+                
+                # Lưu số lượng obj thực tế trả về từ run cuối
+                if run == num_runs - 1:
+                    returned_objs = len(data.get('objects', []))
+                
+            except Exception as e:
+                print(f"  [LỖI] Run {run+1} thất bại: {e}")
+        
+        if success_count > 0:
+            avg_t_local = (avg_t_local / success_count) * 1000
+            avg_t_network = (avg_t_network / success_count) * 1000
+            avg_t_rehydration = (avg_t_rehydration / success_count) * 1000
+            avg_t_total = (avg_t_total / success_count) * 1000
             
-            data = resp.json()
-            timing = data.get("timing", {})
-            rehydration_count = data.get("rehydration_count", 0)
+            local_fetch_times.append(avg_t_local)
+            network_latency_times.append(avg_t_network)
+            rehydration_times.append(avg_t_rehydration)
+            total_times.append(avg_t_total)
             
-            # Thời gian lấy cục bộ (Site 0)
-            t_local = timing.get("0", 0.0)
+            csv_data.append([count, avg_t_local, avg_t_network, avg_t_rehydration, avg_t_total])
             
-            # Thời gian mạng (Max của Site 1 và Site 2)
-            t_remote_1 = timing.get("1", 0.0)
-            t_remote_2 = timing.get("2", 0.0)
-            t_network = max(t_remote_1, t_remote_2)
-            
-            t_total = data.get("total_time", end_time - start_time)
-            
-            # Thời gian rehydration xấp xỉ bằng t_total - max(t_local, t_network)
-            t_rehydration = max(0, t_total - max(t_local, t_network))
-            
-            local_fetch_times.append(t_local * 1000)      # Đổi sang ms
-            network_latency_times.append(t_network * 1000)
-            rehydration_times.append(t_rehydration * 1000)
-            total_times.append(t_total * 1000)
-            
-            print(f"  Thành công: {len(data.get('results', []))} đối tượng.")
-            print(f"  + Local Fetch:   {t_local * 1000:.1f} ms")
-            print(f"  + Network (Max): {t_network * 1000:.1f} ms")
-            print(f"  + Rehydration:   {t_rehydration * 1000:.1f} ms")
-            print(f"  = Total Time:    {t_total * 1000:.1f} ms")
-            
-        except Exception as e:
-            print(f"  [LỖI] Benchmark thất bại tại mốc {count}: {e}")
-            break
+            print(f"  Thành công: ~{returned_objs} đối tượng.")
+            print(f"  + Local Fetch:   {avg_t_local:.1f} ms")
+            print(f"  + Network (Max): {avg_t_network:.1f} ms")
+            print(f"  + Rehydration:   {avg_t_rehydration:.1f} ms")
+            print(f"  = Total Time:    {avg_t_total:.1f} ms")
+        else:
+            print(f"  [LỖI] Benchmark thất bại hoàn toàn tại mốc {count}.")
 
-    # Vẽ biểu đồ nếu thu thập đủ dữ liệu
+    # Xuất CSV
+    if csv_data:
+        print("\nĐang xuất kết quả ra file 'benchmark_results.csv'...")
+        with open('benchmark_results.csv', mode='w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(csv_headers)
+            writer.writerows(csv_data)
+
+    # Vẽ biểu đồ
     if len(total_times) > 0:
-        print("\nĐang xuất biểu đồ ra file 'benchmark_results.png'...")
+        print("Đang xuất biểu đồ ra file 'benchmark_results.png'...")
         
         counts = object_counts[:len(total_times)]
         x = np.arange(len(counts))
@@ -90,9 +116,9 @@ def run_benchmark():
         ax.plot(x, total_times, color='black', marker='o', linestyle='-', linewidth=2, label='Total Response Time')
         
         # Trang trí đồ thị
-        ax.set_ylabel('Thời gian phản hồi (ms)')
+        ax.set_ylabel('Thời gian phản hồi trung bình (ms)')
         ax.set_xlabel('Số lượng đối tượng (Objects)')
-        ax.set_title('Đánh giá Hiệu năng Hệ quản trị CSDL Phân tán\n(Phân mảnh dọc & Khôi phục đối tượng đa hình)')
+        ax.set_title('Đánh giá Hiệu năng Hệ quản trị CSDL Phân tán (Trung bình 5 lần chạy)\n(Phân mảnh dọc & Khôi phục đối tượng đa hình)')
         ax.set_xticks(x)
         ax.set_xticklabels([f"{c} objs" for c in counts])
         ax.legend()
@@ -103,7 +129,7 @@ def run_benchmark():
 
         plt.tight_layout()
         plt.savefig("benchmark_results.png", dpi=300)
-        print("Đã lưu 'benchmark_results.png'. Bạn có thể copy hình này vào báo cáo!")
+        print("Hoàn tất! Bạn có thể copy 'benchmark_results.png' và 'benchmark_results.csv' vào báo cáo!")
 
 if __name__ == "__main__":
     run_benchmark()

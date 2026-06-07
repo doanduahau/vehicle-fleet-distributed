@@ -104,9 +104,41 @@ class Coordinator:
         # =================================================================
         # DISTRIBUTED SCHEMA REGISTRY (HỆ QUẢN TRỊ LƯỢC ĐỒ PHÂN TÁN)
         # =================================================================
+        self._registry_file = "schema_registry.json"
+        self._load_schema_registry()
+
+    def _load_schema_registry(self):
+        import os
+        if os.path.exists(self._registry_file):
+            try:
+                with open(self._registry_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.global_schema_version = data.get("version", "1.0.0")
+                    self.schema_changelog = data.get("changelog", [])
+                    # json keys are strings, convert back to int for sites
+                    pending = data.get("pending", {})
+                    self.pending_schemas = {int(k): v for k, v in pending.items()}
+            except Exception as e:
+                print(f"[Schema Registry] Lỗi nạp sổ cái từ ổ đĩa: {e}")
+                self._init_default_registry()
+        else:
+            self._init_default_registry()
+
+    def _init_default_registry(self):
         self.global_schema_version = "1.0.0"
-        self.schema_changelog = []  # Lưu lịch sử các lần tiến hóa (Event Sourcing)
-        self.pending_schemas = {site_id: [] for site_id in self.sites}  # Hàng đợi Offline Catch-up
+        self.schema_changelog = []
+        self.pending_schemas = {site_id: [] for site_id in self.sites}
+        
+    def _save_schema_registry(self):
+        try:
+            with open(self._registry_file, "w", encoding="utf-8") as f:
+                json.dump({
+                    "version": self.global_schema_version,
+                    "changelog": self.schema_changelog,
+                    "pending": self.pending_schemas
+                }, f, indent=4)
+        except Exception as e:
+            print(f"[Schema Registry] Lỗi lưu sổ cái xuống ổ đĩa: {e}")
 
     def _site_url(self, site_id: int, path: str) -> str:
         """Hàm tiện ích ghép Host và Port thành URL đầy đủ (Ví dụ: http://site1:5001/query)"""
@@ -143,6 +175,7 @@ class Coordinator:
         value: Optional[str] = None,
         year_min: Optional[int] = None,
         year_max: Optional[int] = None,
+        limit: Optional[int] = None,
     ) -> Tuple[int, List[Dict], float, Optional[str]]:
         """
         Hành động: Gửi mạng HTTP tới 1 máy chủ cụ thể để lấy dữ liệu.
@@ -160,6 +193,7 @@ class Coordinator:
             if value: params["value"] = value
             if year_min: params["year_min"] = year_min
             if year_max: params["year_max"] = year_max
+            if limit: params["limit"] = limit
 
             url = self._site_url(site_id, "/query") if params else self._site_url(site_id, "/objects")
 
@@ -202,6 +236,7 @@ class Coordinator:
         value: Optional[str] = None,
         year_min: Optional[int] = None,
         year_max: Optional[int] = None,
+        limit: Optional[int] = None,
         include_sites: Optional[List[int]] = None,
     ) -> QueryResult:
         """
@@ -230,7 +265,7 @@ class Coordinator:
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(sites_to_query)) as executor:
             # Phóng các luồng đi...
             futures = {
-                executor.submit(self._fetch_from_site, sid, field, value, year_min, year_max): sid
+                executor.submit(self._fetch_from_site, sid, field, value, year_min, year_max, limit): sid
                 for sid in sites_to_query
             }
             # Thu gom kết quả khi các luồng trả về
@@ -366,6 +401,10 @@ class Coordinator:
             # Xóa các update đã thành công khỏi hàng đợi
             for u in successful_updates:
                 self.pending_schemas[site_id].remove(u)
+                
+            # Lưu lại xuống đĩa nếu có thay đổi
+            if successful_updates:
+                self._save_schema_registry()
 
     def schema_evolve(self, attribute: str, default_value: Any, new_version: str) -> Dict[str, Any]:
         """
@@ -378,14 +417,14 @@ class Coordinator:
         # Giả lập: Nếu người dùng nhập version <= version hiện tại -> Từ chối!
         # Đây là cách Coordinator ngăn chặn 2 Admin cập nhật đè lên nhau.
         try:
-            current_v = float(self.global_schema_version.replace("v", "").replace(".", ""))
-            new_v = float(new_version.replace("v", "").replace(".", ""))
+            current_v = tuple(map(int, self.global_schema_version.replace("v", "").split(".")))
+            new_v = tuple(map(int, new_version.replace("v", "").split(".")))
             if new_v <= current_v:
                 return {
                     "error": f"Conflict Detected! Phiên bản yêu cầu ({new_version}) phải lớn hơn phiên bản hiện tại ({self.global_schema_version})"
                 }
-        except ValueError:
-            pass # Bỏ qua nếu version không phải dạng số (vd: v1.x)
+        except Exception:
+            pass # Bỏ qua nếu version không thể parse (vd: v1.x)
             
         # Cập nhật Global Schema Registry
         self.global_schema_version = new_version
@@ -403,6 +442,9 @@ class Coordinator:
         # Thêm vào hàng đợi Pending của TẤT CẢ các site
         for site_id in self.sites:
             self.pending_schemas[site_id].append(update_payload)
+            
+        # Lưu Schema Registry xuống đĩa
+        self._save_schema_registry()
 
         # 2. EVENTUAL CONSISTENCY PROPAGATION
         # Gửi lập tức đến các site đang sống
@@ -419,6 +461,7 @@ class Coordinator:
                 results["sites"][site_id] = resp.json()
                 # Xóa khỏi hàng đợi vì đã update thành công
                 self.pending_schemas[site_id].remove(update_payload)
+                self._save_schema_registry()
                 print(f"  [OK] Site {site_id} cập nhật thành công.")
             except Exception as exc:
                 results["sites"][site_id] = {"error": str(exc), "status": "PENDING"}

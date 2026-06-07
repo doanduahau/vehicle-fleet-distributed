@@ -71,11 +71,20 @@ class Vehicle:
     _created_at: float = field(default_factory=time.time, repr=False, compare=False)
 
     def display(self) -> str:
-        return (
+        base = (
             f"[Vehicle] OID={self.oid}  VIN={self.vin}\n"
             f"  Hãng/Mẫu: {self.make} {self.model} ({self.year})\n"
             f"  Phiên bản Schema: v{self.schema_version}"
         )
+        
+        dynamic_attrs = []
+        for k, v in self.__dict__.items():
+            if k not in ['oid', 'make', 'model', 'year', 'vin', 'schema_version'] and not k.startswith('_'):
+                dynamic_attrs.append(f"{k}={v}")
+        if dynamic_attrs:
+            base += "\n  [Thuộc tính mở rộng] " + " | ".join(dynamic_attrs)
+            
+        return base
 
 class VehicleSchema(Schema):
     """
@@ -98,9 +107,21 @@ class VehicleSchema(Schema):
     @post_load
     def make_object(self, data, **kwargs):
         """Hàm này tự động chạy sau khi Marshmallow đọc xong JSON để đúc ra Object."""
-        # Bỏ đi nhãn class vì class Vehicle không có thuộc tính này trong __init__
         data.pop("__class__", None)
-        return Vehicle(**data)
+        
+        # Tách riêng các trường cốt lõi và các trường mở rộng
+        core_fields = ['oid', 'make', 'model', 'year', 'vin', 'schema_version']
+        core_data = {k: v for k, v in data.items() if k in core_fields}
+        extra_data = {k: v for k, v in data.items() if k not in core_fields}
+        
+        # Đúc xe cơ bản
+        obj = Vehicle(**core_data)
+        
+        # Gắn thêm các tính năng mở rộng
+        for k, v in extra_data.items():
+            setattr(obj, k, v)
+            
+        return obj
 
 
 # =============================================================================
@@ -116,12 +137,21 @@ class Truck(Vehicle):
 
     def display(self) -> str:
         base = super().display().replace("[Vehicle]", "[Truck   ]")
-        return (
+        out = (
             base + "\n"
             f"  Tải trọng: {self.payload_capacity_kg:,.0f} kg  "
             f"Số trục: {self.axle_count}  "
             f"Rơ-moóc: {'Có' if self.has_trailer else 'Không'}"
         )
+        
+        dynamic_attrs = []
+        for k, v in self.__dict__.items():
+            if k not in ['oid', 'make', 'model', 'year', 'vin', 'schema_version', 'payload_capacity_kg', 'axle_count', 'has_trailer'] and not k.startswith('_'):
+                dynamic_attrs.append(f"{k}={v}")
+        if dynamic_attrs:
+            out += "\n  [Thuộc tính mở rộng] " + " | ".join(dynamic_attrs)
+            
+        return out
 
 class TruckSchema(VehicleSchema):
     """
@@ -135,7 +165,20 @@ class TruckSchema(VehicleSchema):
     @post_load
     def make_object(self, data, **kwargs):
         data.pop("__class__", None)
-        return Truck(**data)
+        
+        # Tách riêng các trường cốt lõi và các trường mở rộng
+        core_fields = ['oid', 'make', 'model', 'year', 'vin', 'schema_version', 'payload_capacity_kg', 'axle_count', 'has_trailer']
+        core_data = {k: v for k, v in data.items() if k in core_fields}
+        extra_data = {k: v for k, v in data.items() if k not in core_fields}
+        
+        # Đúc xe tải
+        obj = Truck(**core_data)
+        
+        # Gắn thêm các tính năng mở rộng
+        for k, v in extra_data.items():
+            setattr(obj, k, v)
+            
+        return obj
 
 
 # =============================================================================

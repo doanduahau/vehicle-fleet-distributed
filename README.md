@@ -12,12 +12,12 @@ Implements **Distributed Inheritance Handling** for a Vehicle Fleet system acros
 
 | Concept | Implementation | Özsu & Valduriez Reference |
 |---|---|---|
-| **OID Management** | Structured OIDs `site.class.seq`, collision-free | §12.2 |
-| **Complexity Handling** | `Vehicle → Truck`, `Vehicle → ElectricCar` hierarchy | §12.1 |
-| **Network Awareness** | Measures per-site fetch time + rehydration overhead | §12.3.4 |
-| **Serialization** | JSON roundtrip with schema version tracking | §12.3.3 |
-| **Garbage Collection** | Reference counting hooks on all objects | §12.5 |
-| **Schema Evolution** | Broadcast attribute additions + lazy migration | §12.4 |
+| **OID Management** | Structured OIDs `site.class.seq`, collision-free | Object Identity |
+| **Complexity Handling** | `Vehicle → Truck`, `Vehicle → ElectricCar` hierarchy | The Object Model |
+| **Network Awareness** | Measures per-site fetch time + rehydration overhead | Distributed Object Queries |
+| **Serialization** | JSON roundtrip with schema version tracking | Object Serialization |
+| **Garbage Collection** | Reference counting hooks on all objects | Garbage Collection |
+| **Schema Evolution** | Broadcast attribute additions + lazy migration | Schema Evolution |
 
 ---
 
@@ -98,9 +98,6 @@ vehicle-fleet-distributed/
 ├── start_all.py           # Launcher for local dev (no Docker)
 ├── Dockerfile             # Single site server image
 ├── docker-compose.yml     # 3-site orchestration
-├── PROJECT_PROPOSAL.md    # Project proposal (deliverable 1)
-├── DESIGN_DOCUMENT.md     # 2-page design doc (deliverable 2)
-├── ANALYSIS_REPORT.md     # Theory analysis (deliverable 4)
 └── requirements.txt
 ```
 
@@ -124,15 +121,15 @@ Docker makes each "site" truly autonomous (Özsu §3.3), not just a different po
 
 | Option | Demo | Theory |
 |---|---|---|
-| [1] | Ping all sites — see which are online | §3.3 Site Autonomy |
-| [2] | Polymorphic Search all vehicles | §12.3.3 |
-| [3] | Filter by make (e.g., Tesla) | §10.3 Distributed Query |
-| [4] | Filter by year range | §10.3 |
-| [5] | Rehydration cost: Site-0-only vs. all sites | §12.3.4 |
-| [6] | Add attribute to Vehicle → propagate all sites | §12.4 Schema Evolution |
-| [7] | Site failure: query Sites 0+2 only (Truck offline) | §18.1 Availability |
-| [8] | Serialization roundtrip + old schema migration | §12.3.3 |
-| [9] | OID manager stats per site | §12.2 |
+| [1] | Ping all sites — see which are online | Site Autonomy |
+| [2] | Polymorphic Search all vehicles | Distributed Object Queries |
+| [3] | Filter by make (e.g., Tesla) | Distributed Query |
+| [4] | Filter by year range | Distributed Query |
+| [5] | Rehydration cost: Site-0-only vs. all sites | Distributed Object Queries |
+| [6] | Add attribute to Vehicle → propagate all sites | Eventual Schema Evolution |
+| [7] | Site failure: query Sites 0+2 only (Truck offline) | Availability |
+| [8] | Serialization roundtrip + old schema migration | Object Serialization |
+| [9] | OID manager stats per site | Object Identity |
 
 ---
 
@@ -150,11 +147,11 @@ Brands: Volvo, Mercedes, MAN, Scania, DAF, IVECO (Trucks) + Tesla, BYD, Hyundai,
 
 ## 📚 Theory References
 
-- **§12.1** — The Object Model: classes, attributes, inheritance  
-- **§12.2** — Object Identity in Distributed Systems  
-- **§12.3** — Distributed Object Queries & Serialization  
-- **§12.4** — Schema Evolution in Distributed OODBs  
-- **§12.5** — Garbage Collection: Reference Counting  
-- **§4.3** — Vertical Fragmentation  
-- **§10.4** — Parallel Query Execution  
-- **§18.1** — Availability vs. Consistency  
+- The Object Model: classes, attributes, inheritance  
+- Object Identity in Distributed Systems  
+- Distributed Object Queries & Serialization  
+- Schema Evolution in Distributed OODBs  
+- Garbage Collection: Reference Counting  
+- Vertical Fragmentation  
+- Parallel Query Execution  
+- Availability vs. Consistency  
