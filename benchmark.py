@@ -20,22 +20,21 @@ def run_benchmark():
     object_counts = [10, 50, 100, 500, 1000, 1500]
     num_runs = 5
     
-    local_fetch_times = []
-    network_latency_times = []
+    parallel_fetch_times = []
     rehydration_times = []
     total_times = []
     
     csv_data = []
-    csv_headers = ["Object Count", "Local Fetch (ms)", "Network Latency (ms)", "Rehydration (ms)", "Total Time (ms)"]
+    csv_headers = ["Object Count", "Parallel Fetch (ms)", "Rehydration (ms)", "Total Time (ms)"]
     
     for count in object_counts:
         print(f"\n[Mốc {count} đối tượng] Đang gửi truy vấn {num_runs} lần để lấy trung bình...")
         
-        avg_t_local = 0.0
-        avg_t_network = 0.0
+        avg_t_parallel = 0.0
         avg_t_rehydration = 0.0
         avg_t_total = 0.0
         success_count = 0
+        returned_objs = 0
         
         for run in range(num_runs):
             try:
@@ -49,12 +48,15 @@ def run_benchmark():
                 t_local = timing.get("0", 0.0)
                 t_remote_1 = timing.get("1", 0.0)
                 t_remote_2 = timing.get("2", 0.0)
-                t_network = max(t_remote_1, t_remote_2)
-                t_total = data.get("total_time", end_time - start_time)
-                t_rehydration = max(0, t_total - max(t_local, t_network))
                 
-                avg_t_local += t_local
-                avg_t_network += t_network
+                # T_parallel = max(T_site0, T_site1, T_site2)
+                t_parallel = max(t_local, t_remote_1, t_remote_2)
+                t_total = data.get("total_time", end_time - start_time)
+                
+                # T_rehydration = T_total - T_parallel
+                t_rehydration = max(0, t_total - t_parallel)
+                
+                avg_t_parallel += t_parallel
                 avg_t_rehydration += t_rehydration
                 avg_t_total += t_total
                 success_count += 1
@@ -67,23 +69,20 @@ def run_benchmark():
                 print(f"  [LỖI] Run {run+1} thất bại: {e}")
         
         if success_count > 0:
-            avg_t_local = (avg_t_local / success_count) * 1000
-            avg_t_network = (avg_t_network / success_count) * 1000
+            avg_t_parallel = (avg_t_parallel / success_count) * 1000
             avg_t_rehydration = (avg_t_rehydration / success_count) * 1000
             avg_t_total = (avg_t_total / success_count) * 1000
             
-            local_fetch_times.append(avg_t_local)
-            network_latency_times.append(avg_t_network)
+            parallel_fetch_times.append(avg_t_parallel)
             rehydration_times.append(avg_t_rehydration)
             total_times.append(avg_t_total)
             
-            csv_data.append([count, avg_t_local, avg_t_network, avg_t_rehydration, avg_t_total])
+            csv_data.append([count, avg_t_parallel, avg_t_rehydration, avg_t_total])
             
             print(f"  Thành công: ~{returned_objs} đối tượng.")
-            print(f"  + Local Fetch:   {avg_t_local:.1f} ms")
-            print(f"  + Network (Max): {avg_t_network:.1f} ms")
-            print(f"  + Rehydration:   {avg_t_rehydration:.1f} ms")
-            print(f"  = Total Time:    {avg_t_total:.1f} ms")
+            print(f"  + Parallel Fetch (Max of all sites): {avg_t_parallel:.1f} ms")
+            print(f"  + Rehydration Cost:                  {avg_t_rehydration:.1f} ms")
+            print(f"  = Total Time:                        {avg_t_total:.1f} ms")
         else:
             print(f"  [LỖI] Benchmark thất bại hoàn toàn tại mốc {count}.")
 
@@ -105,12 +104,9 @@ def run_benchmark():
         
         fig, ax = plt.subplots(figsize=(10, 6))
         
-        p1 = ax.bar(x, local_fetch_times, width, label='Local Fetch (Site 0)', color='#2ecc71')
-        p2 = ax.bar(x, network_latency_times, width, bottom=local_fetch_times, label='Network Latency (Remote)', color='#3498db')
-        
-        # Rehydration nằm trên cùng
-        bottom_rehydration = np.array(local_fetch_times) + np.array(network_latency_times)
-        p3 = ax.bar(x, rehydration_times, width, bottom=bottom_rehydration, label='Object Rehydration (Join)', color='#e74c3c')
+        # Biểu đồ chỉ còn 2 stack: Parallel Fetch và Rehydration
+        p1 = ax.bar(x, parallel_fetch_times, width, label='Parallel Fetch (Max of Sites)', color='#3498db')
+        p2 = ax.bar(x, rehydration_times, width, bottom=parallel_fetch_times, label='Object Rehydration (Join)', color='#e74c3c')
         
         # Thêm đường tổng thời gian
         ax.plot(x, total_times, color='black', marker='o', linestyle='-', linewidth=2, label='Total Response Time')
@@ -118,7 +114,7 @@ def run_benchmark():
         # Trang trí đồ thị
         ax.set_ylabel('Thời gian phản hồi trung bình (ms)')
         ax.set_xlabel('Số lượng đối tượng (Objects)')
-        ax.set_title('Đánh giá Hiệu năng Hệ quản trị CSDL Phân tán (Trung bình 5 lần chạy)\n(Phân mảnh dọc & Khôi phục đối tượng đa hình)')
+        ax.set_title('Đánh giá Hiệu năng CSDL Phân tán (T_total ≈ T_parallel + T_rehydration)')
         ax.set_xticks(x)
         ax.set_xticklabels([f"{c} objs" for c in counts])
         ax.legend()

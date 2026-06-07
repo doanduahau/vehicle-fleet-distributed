@@ -339,6 +339,7 @@ class SiteServer:
                 value = request.args.get("value")
                 year_min = request.args.get("year_min", type=int)
                 year_max = request.args.get("year_max", type=int)
+                limit = request.args.get("limit", type=int)
                 sites_arg = request.args.get("include_sites")
                 
                 include_sites = None
@@ -347,7 +348,7 @@ class SiteServer:
 
                 # Chuyển lệnh tìm kiếm này cho Coordinator giải quyết (Xem Coordinator_engine.py)
                 result = self.coordinator_engine.polymorphic_search(
-                    field=field, value=value, year_min=year_min, year_max=year_max, include_sites=include_sites
+                    field=field, value=value, year_min=year_min, year_max=year_max, limit=limit, include_sites=include_sites
                 )
                 
                 return jsonify({

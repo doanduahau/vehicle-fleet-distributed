@@ -63,21 +63,6 @@ python main.py    # -> option [7]
 docker compose start site1
 ```
 
-### Option B: Local processes (no Docker)
-
-```bash
-# 1. Install dependencies
-pip install -r requirements.txt
-
-# 2. Start all site servers (keep this terminal open)
-python start_all.py
-
-# 3. (New terminal) Seed data
-python setup/seed_data.py
-
-# 4. (New terminal) Run interactive demo
-python main.py
-```
 
 ---
 
@@ -95,7 +80,6 @@ vehicle-fleet-distributed/
 │   └── seed_data.py       # Populate all sites with sample data
 ├── data/                  # Local JSON storage (auto-created)
 ├── main.py                # Interactive CLI demo
-├── start_all.py           # Launcher for local dev (no Docker)
 ├── Dockerfile             # Single site server image
 ├── docker-compose.yml     # 3-site orchestration
 └── requirements.txt
