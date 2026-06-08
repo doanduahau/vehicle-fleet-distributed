@@ -82,6 +82,9 @@
         <option value="boolean">boolean</option>
       </select>
 
+      <label>Giá trị mặc định</label>
+      <input id="schemaDefault" placeholder="VD: Không thời hạn / 0 / false">
+
       <label>Version mới</label>
       <input id="schemaVersion" placeholder="VD: 1.1.0">
 
@@ -206,7 +209,15 @@ Limit = 20</pre>
     async function evolveSchema() {
       const attr = document.getElementById("schemaAttr").value;
       const type = document.getElementById("schemaType").value;
+      const defaultInput = document.getElementById("schemaDefault").value;
       const version = document.getElementById("schemaVersion").value;
+
+      let defaultValue = defaultInput;
+      if (type === "number") {
+        defaultValue = parseFloat(defaultInput) || 0;
+      } else if (type === "boolean") {
+        defaultValue = defaultInput.toLowerCase() === "true";
+      }
 
       const res = await fetch("/global/schema_evolve", {
         method: "POST",
@@ -215,7 +226,7 @@ Limit = 20</pre>
         },
         body: JSON.stringify({
           attribute: attr,
-          default: type === "number" ? 0 : (type === "boolean" ? false : ""),
+          default: defaultValue,
           new_version: version
         })
       });
