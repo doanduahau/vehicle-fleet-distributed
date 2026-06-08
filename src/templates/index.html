@@ -176,22 +176,28 @@ Limit = 20</pre>
     }
 
     async function checkStatus() {
-      const sites = [
-        { id: 0, url: "http://localhost:5000/ping", name: "Site 0 - Vehicle" },
-        { id: 1, url: "http://localhost:5001/ping", name: "Site 1 - Truck" },
-        { id: 2, url: "http://localhost:5002/ping", name: "Site 2 - ElectricCar" }
-      ];
+      const siteNames = {
+        0: "Site 0 - Vehicle",
+        1: "Site 1 - Truck",
+        2: "Site 2 - ElectricCar"
+      };
 
       let html = "<h3>Site Status</h3>";
 
-      for (const site of sites) {
-        try {
-          const res = await fetch(site.url);
-          const data = await res.json();
-          html += `<p>✅ ${site.name}: Online - ${data.object_count || 0} objects</p>`;
-        } catch (e) {
-          html += `<p>❌ ${site.name}: Offline</p>`;
+      try {
+        const res = await fetch("/global/stats");
+        const data = await res.json();
+        
+        for (let i = 0; i <= 2; i++) {
+          const siteData = data[i];
+          if (siteData && !siteData.error) {
+            html += `<p>✅ ${siteNames[i]}: Online - ${siteData.object_count || 0} objects</p>`;
+          } else {
+            html += `<p>❌ ${siteNames[i]}: Offline</p>`;
+          }
         }
+      } catch (e) {
+        html += `<p>❌ Master Node Offline hoặc lỗi mạng</p>`;
       }
 
       document.getElementById("siteStatus").innerHTML = html;

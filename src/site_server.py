@@ -458,7 +458,7 @@ class SiteServer:
 
             @app.route("/benchmark_results.png")
             def benchmark_image():
-                return send_file("../benchmark_results.png", mimetype="image/png")
+                return send_file("benchmark_results.png", mimetype="image/png")
 
     def run(self) -> None:
         """Hàm bật máy chủ Flask lắng nghe Request."""
