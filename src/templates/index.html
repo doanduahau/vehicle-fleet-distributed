@@ -236,7 +236,7 @@ Limit = 20</pre>
       const data = await res.json();
 
       document.getElementById("benchmarkResult").innerHTML =
-        `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+        `<pre style="overflow-x: auto; white-space: pre-wrap; background: #1e1e1e; color: #fff; padding: 10px; border-radius: 5px;">${data.stdout || data.error || "Không có kết quả"}</pre>`;
 
       if (data.status === "done") {
         const img = document.getElementById("benchmarkImage");
