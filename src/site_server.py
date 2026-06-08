@@ -23,10 +23,11 @@ import json
 import os
 import sys
 import time
+import subprocess
 from typing import Any, Dict, List, Optional
 import psycopg2          # Thư viện để kết nối và tương tác với PostgreSQL
 
-from flask import Flask, jsonify, request, render_template # Flask là Framework để tạo Web Server / API Server
+from flask import Flask, jsonify, request, render_template, send_file # Flask là Framework để tạo Web Server / API Server
 
 # Đảm bảo Python hiểu được đường dẫn để import các file khác trong thư mục src/
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -432,6 +433,32 @@ class SiteServer:
             @app.route("/global/stats", methods=["GET"])
             def global_stats():
                 return jsonify(self.coordinator_engine.get_site_stats())
+
+            @app.route("/run_benchmark", methods=["POST"])
+            def run_benchmark():
+                if self.site_id != 0:
+                    return jsonify({"error": "Benchmark only runs on coordinator site"}), 400
+
+                try:
+                    result = subprocess.run(
+                        ["python", "benchmark.py"],
+                        capture_output=True,
+                        text=True,
+                        timeout=120
+                    )
+
+                    return jsonify({
+                        "status": "done",
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                        "image": "/benchmark_results.png"
+                    })
+                except Exception as e:
+                    return jsonify({"error": str(e)}), 500
+
+            @app.route("/benchmark_results.png")
+            def benchmark_image():
+                return send_file("../benchmark_results.png", mimetype="image/png")
 
     def run(self) -> None:
         """Hàm bật máy chủ Flask lắng nghe Request."""

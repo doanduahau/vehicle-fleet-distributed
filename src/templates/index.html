@@ -11,6 +11,12 @@
     <p class="subtitle">Polymorphic Query • Semi-Join • Object Rehydration</p>
 
     <div class="card">
+      <h2>Site Status</h2>
+      <button onclick="checkStatus()">Kiểm tra trạng thái các Site</button>
+      <div id="siteStatus"></div>
+    </div>
+
+    <div class="card">
       <h2>Query Planner Demo</h2>
 
       <label>Class</label>
@@ -63,6 +69,51 @@
         <tbody id="results"></tbody>
       </table>
     </div>
+
+    <div class="card">
+      <h2>Schema Evolution</h2>
+      <label>Tên thuộc tính mới</label>
+      <input id="schemaAttr" placeholder="VD: insurance_expiry">
+
+      <label>Kiểu dữ liệu</label>
+      <select id="schemaType">
+        <option value="string">string</option>
+        <option value="number">number</option>
+        <option value="boolean">boolean</option>
+      </select>
+
+      <label>Version mới</label>
+      <input id="schemaVersion" placeholder="VD: 1.1.0">
+
+      <button onclick="evolveSchema()">Cập nhật Schema</button>
+
+      <div id="schemaResult"></div>
+    </div>
+
+    <div class="card">
+      <h2>Benchmark</h2>
+      <button onclick="runBenchmark()">Chạy Benchmark</button>
+      <div id="benchmarkResult"></div>
+      <img id="benchmarkImage" style="max-width:100%; display:none; margin-top:15px;">
+    </div>
+
+    <div class="card">
+      <h2>Failure Demo</h2>
+      <p>Dùng terminal để tắt Site 1:</p>
+      <pre>docker compose stop site1</pre>
+
+      <p>Sau đó chạy truy vấn trên giao diện:</p>
+      <pre>Class = Vehicle
+Field = year
+Operator = &gt;
+Value = 2018
+Limit = 20</pre>
+
+      <p>Kết quả mong muốn: hệ thống vẫn trả dữ liệu từ Site 0 và Site 2, đồng thời báo lỗi Site 1 offline.</p>
+
+      <p>Bật lại Site 1:</p>
+      <pre>docker compose start site1</pre>
+    </div>
   </div>
 
   <script>
@@ -91,6 +142,22 @@
         <p><b>ElectricCar:</b> ${(data.rehydration_by_site && data.rehydration_by_site["2"]) || 0}</p>
       `;
 
+      let timingHtml = "<h3>Network Timing</h3>";
+      if (data.timing) {
+        for (const [site, time] of Object.entries(data.timing)) {
+          timingHtml += `<p>Site ${site}: ${time.toFixed ? time.toFixed(3) : time} s</p>`;
+        }
+      }
+      
+      if (data.errors && Object.keys(data.errors).length > 0) {
+        timingHtml += "<h3 style='color:red'>Site Errors</h3>";
+        for (const [site, errorMsg] of Object.entries(data.errors)) {
+          timingHtml += `<p style='color:red'>Site ${site}: ${errorMsg}</p>`;
+        }
+      }
+
+      document.getElementById("summary").innerHTML += timingHtml;
+
       const tbody = document.getElementById("results");
       tbody.innerHTML = "";
 
@@ -106,6 +173,70 @@
         `;
         tbody.appendChild(row);
       });
+    }
+
+    async function checkStatus() {
+      const sites = [
+        { id: 0, url: "http://localhost:5000/ping", name: "Site 0 - Vehicle" },
+        { id: 1, url: "http://localhost:5001/ping", name: "Site 1 - Truck" },
+        { id: 2, url: "http://localhost:5002/ping", name: "Site 2 - ElectricCar" }
+      ];
+
+      let html = "<h3>Site Status</h3>";
+
+      for (const site of sites) {
+        try {
+          const res = await fetch(site.url);
+          const data = await res.json();
+          html += `<p>✅ ${site.name}: Online - ${data.object_count || 0} objects</p>`;
+        } catch (e) {
+          html += `<p>❌ ${site.name}: Offline</p>`;
+        }
+      }
+
+      document.getElementById("siteStatus").innerHTML = html;
+    }
+
+    async function evolveSchema() {
+      const attr = document.getElementById("schemaAttr").value;
+      const type = document.getElementById("schemaType").value;
+      const version = document.getElementById("schemaVersion").value;
+
+      const res = await fetch("/global/schema_evolve", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          attribute: attr,
+          default: type === "number" ? 0 : (type === "boolean" ? false : ""),
+          new_version: version
+        })
+      });
+
+      const data = await res.json();
+
+      document.getElementById("schemaResult").innerHTML =
+        `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+    }
+
+    async function runBenchmark() {
+      document.getElementById("benchmarkResult").innerHTML = "Đang chạy benchmark...";
+
+      const res = await fetch("/run_benchmark", {
+        method: "POST"
+      });
+
+      const data = await res.json();
+
+      document.getElementById("benchmarkResult").innerHTML =
+        `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+
+      if (data.status === "done") {
+        const img = document.getElementById("benchmarkImage");
+        img.src = "/benchmark_results.png?t=" + Date.now();
+        img.style.display = "block";
+      }
     }
   </script>
 </body>

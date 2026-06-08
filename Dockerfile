@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy toàn bộ source
 COPY src/ ./src/
 COPY setup/ ./setup/
+COPY benchmark.py .
 
 # Thư mục data sẽ được mount từ host (hoặc volume)
 RUN mkdir -p data
