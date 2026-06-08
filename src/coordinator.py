@@ -65,20 +65,21 @@ class QueryResult:
             f"  Tổng số đối tượng tìm thấy : {len(self.objects)}",
             f"  Số đối tượng được phục hồi : {self.rehydration_count} (cần kết hợp xuyên site)",
             "  Phục hồi theo từng site:",
-            f"  Tổng thời gian (wall-clock) : {self.total_time:.3f}s",
-            "",
-            "  Thời gian trễ mạng (Network Latency) từng site:",
         ]
         for site_id, count in self.rehydration_by_site.items():
             name = SITES.get(site_id, {}).get("name", f"Site {site_id}")
-            lines.append(f"    {name}: {count} đối tượng")
+            lines.append(f"    Site-{site_id} ({name}): {count} đối tượng")
             
-        lines.append("")
-        lines.append("  Thời gian trễ mạng (Network Latency) từng site:")
+        lines.extend([
+            f"  Tổng thời gian (wall-clock) : {self.total_time:.3f}s",
+            "",
+            "  Thời gian trễ mạng (Network Latency) từng site:",
+        ])
+            
         # In ra thời gian trễ của từng Site
         for site_id, t in self.timing.items():
             name = SITES.get(int(site_id), {}).get("name", f"Site {site_id}")
-            lines.append(f"    {name}: {t:.3f}s")
+            lines.append(f"    Site-{site_id} ({name}): {t:.3f}s")
             
         # In ra màu đỏ nếu có Site nào bị rớt mạng (Graceful Degradation)
         if self.errors:
@@ -341,8 +342,6 @@ class Coordinator:
                     if oid_str in subclass_by_oid:
                         source_site, subclass_data = subclass_by_oid[oid_str]
                         merged = {**base_data, **subclass_data}
-                        result.rehydration_count += 1
-                        result.rehydration_by_site[source_site] = result.rehydration_by_site.get(source_site, 0) + 1
                     else:
                         merged = base_data
 
@@ -375,6 +374,14 @@ class Coordinator:
                     break # Không còn dữ liệu ở site gốc để lấy thêm
                     
             result.objects = collected_objects[:limit]
+            
+            # Tính toán lại thông số phục hồi chuẩn xác cho kết quả cuối
+            result.rehydration_count = sum(1 for obj in result.objects if obj.__class__.__name__ != "Vehicle")
+            result.rehydration_by_site = {
+                1: sum(1 for obj in result.objects if obj.__class__.__name__ == "Truck"),
+                2: sum(1 for obj in result.objects if obj.__class__.__name__ == "ElectricCar"),
+            }
+            
             result.total_time = time.perf_counter() - t_start
             return result
         else:
@@ -420,8 +427,6 @@ class Coordinator:
                 print(f"  [REHYDRATION LOG] Đang join dữ liệu qua mạng cho OID={oid_str}...")
                 source_site, subclass_data = subclass_by_oid[oid_str]
                 merged = {**base_data, **subclass_data}
-                result.rehydration_count += 1
-                result.rehydration_by_site[source_site] = result.rehydration_by_site.get(source_site, 0) + 1
             else:
                 # Nếu không khớp thì đây chỉ là chiếc Vehicle bình thường
                 merged = base_data
@@ -453,6 +458,13 @@ class Coordinator:
 
         if limit and limit > 0:
             result.objects = result.objects[:limit]
+
+        # Tính toán lại thông số phục hồi chuẩn xác cho kết quả cuối
+        result.rehydration_count = sum(1 for obj in result.objects if obj.__class__.__name__ != "Vehicle")
+        result.rehydration_by_site = {
+            1: sum(1 for obj in result.objects if obj.__class__.__name__ == "Truck"),
+            2: sum(1 for obj in result.objects if obj.__class__.__name__ == "ElectricCar"),
+        }
 
         result.total_time = time.perf_counter() - t_start
         return result
