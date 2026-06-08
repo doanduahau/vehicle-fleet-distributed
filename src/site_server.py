@@ -26,7 +26,7 @@ import time
 from typing import Any, Dict, List, Optional
 import psycopg2          # Thư viện để kết nối và tương tác với PostgreSQL
 
-from flask import Flask, jsonify, request # Flask là Framework để tạo Web Server / API Server
+from flask import Flask, jsonify, request, render_template # Flask là Framework để tạo Web Server / API Server
 
 # Đảm bảo Python hiểu được đường dẫn để import các file khác trong thư mục src/
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -65,7 +65,7 @@ class SiteServer:
 
 
         # Khởi tạo Web Server (Flask)
-        self.app = Flask(f"site_{site_id}")
+        self.app = Flask(__name__, template_folder='templates', static_folder='static')
         self._register_routes()
 
     # ------------------------------------------------------------------
@@ -152,6 +152,12 @@ class SiteServer:
     def _register_routes(self) -> None:
         """Khai báo các đường dẫn API mà máy chủ này có thể nhận."""
         app = self.app
+
+        @app.route("/", methods=["GET"])
+        def home():
+            if self.site_id == 0:
+                return render_template("index.html")
+            return "Chỉ có Site 0 (Coordinator) mới chạy được giao diện Web.", 403
 
         @app.route("/ping", methods=["GET"])
         def ping():

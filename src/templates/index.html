@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Vehicle Fleet Distributed DB</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Vehicle Fleet Distributed Database</h1>
+    <p class="subtitle">Polymorphic Query • Semi-Join • Object Rehydration</p>
+
+    <div class="card">
+      <h2>Query Planner Demo</h2>
+
+      <label>Class</label>
+      <select id="className">
+        <option value="Vehicle">Vehicle (Polymorphic)</option>
+        <option value="Truck">Truck</option>
+        <option value="ElectricCar">ElectricCar</option>
+      </select>
+
+      <label>Field</label>
+      <select id="field">
+        <option value="">Không lọc</option>
+        <option value="make">make</option>
+        <option value="year">year</option>
+        <option value="payload_capacity_kg">payload_capacity_kg</option>
+        <option value="battery_capacity_kwh">battery_capacity_kwh</option>
+      </select>
+
+      <label>Operator</label>
+      <select id="op">
+        <option value="eq">=</option>
+        <option value="gt">&gt;</option>
+        <option value="gte">&gt;=</option>
+        <option value="lt">&lt;</option>
+        <option value="lte">&lt;=</option>
+      </select>
+
+      <label>Value</label>
+      <input id="value" placeholder="VD: Tesla hoặc 80">
+
+      <label>Limit</label>
+      <input id="limit" type="number" value="20">
+
+      <button onclick="runQuery()">Chạy truy vấn</button>
+    </div>
+
+    <div class="card">
+      <h2>Kết quả</h2>
+      <div id="summary"></div>
+      <table>
+        <thead>
+          <tr>
+            <th>OID</th>
+            <th>Class</th>
+            <th>Make</th>
+            <th>Model</th>
+            <th>Year</th>
+          </tr>
+        </thead>
+        <tbody id="results"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    async function runQuery() {
+      const params = new URLSearchParams();
+
+      const className = document.getElementById("className").value;
+      const field = document.getElementById("field").value;
+      const op = document.getElementById("op").value;
+      const value = document.getElementById("value").value;
+      const limit = document.getElementById("limit").value;
+
+      if (className) params.append("class_name", className);
+      if (field) params.append("field", field);
+      if (value) params.append("value", value);
+      if (op) params.append("op", op);
+      if (limit) params.append("limit", limit);
+
+      const res = await fetch("/global/search?" + params.toString());
+      const data = await res.json();
+
+      document.getElementById("summary").innerHTML = `
+        <p><b>Tổng số:</b> ${data.count || 0}</p>
+        <p><b>Rehydrated:</b> ${data.rehydration_count || 0}</p>
+        <p><b>Truck:</b> ${(data.rehydration_by_site && data.rehydration_by_site["1"]) || 0}</p>
+        <p><b>ElectricCar:</b> ${(data.rehydration_by_site && data.rehydration_by_site["2"]) || 0}</p>
+      `;
+
+      const tbody = document.getElementById("results");
+      tbody.innerHTML = "";
+
+      const objects = data.objects || [];
+      objects.forEach(obj => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${obj.oid || ""}</td>
+          <td>${obj.__class__ || ""}</td>
+          <td>${obj.make || ""}</td>
+          <td>${obj.model || ""}</td>
+          <td>${obj.year || ""}</td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+  </script>
+</body>
+</html>
