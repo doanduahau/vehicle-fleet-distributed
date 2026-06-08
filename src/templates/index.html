@@ -26,14 +26,20 @@
         <option value="ElectricCar">ElectricCar</option>
       </select>
 
-      <label>Field</label>
-      <select id="field">
-        <option value="">Không lọc</option>
-        <option value="make">make</option>
-        <option value="year">year</option>
-        <option value="payload_capacity_kg">payload_capacity_kg</option>
-        <option value="battery_capacity_kwh">battery_capacity_kwh</option>
-      </select>
+      <label>Field (Có thể gõ tên thuộc tính mới)</label>
+      <input id="field" list="fieldList" placeholder="VD: make, year, axles... (để trống nếu không lọc)">
+      <datalist id="fieldList">
+        <option value="make">
+        <option value="model">
+        <option value="year">
+        <option value="vin">
+        <option value="payload_capacity_kg">
+        <option value="axle_count">
+        <option value="has_trailer">
+        <option value="battery_capacity_kwh">
+        <option value="range_km">
+        <option value="charge_connector">
+      </datalist>
 
       <label>Operator</label>
       <select id="op">
@@ -64,6 +70,7 @@
             <th>Make</th>
             <th>Model</th>
             <th>Year</th>
+            <th>Đặc tả riêng</th>
           </tr>
         </thead>
         <tbody id="results"></tbody>
@@ -164,8 +171,17 @@ Limit = 20</pre>
       const tbody = document.getElementById("results");
       tbody.innerHTML = "";
 
+      const baseKeys = ["oid", "__class__", "make", "model", "year", "vin"];
+      
       const objects = data.objects || [];
       objects.forEach(obj => {
+        let extraHtml = [];
+        for (const [key, value] of Object.entries(obj)) {
+          if (!baseKeys.includes(key) && value !== null && value !== "") {
+            extraHtml.push(`<span style="background:#eee; padding:2px 5px; border-radius:3px; font-size:0.85em; margin-right:4px;"><b>${key}</b>: ${value}</span>`);
+          }
+        }
+        
         const row = document.createElement("tr");
         row.innerHTML = `
           <td>${obj.oid || ""}</td>
@@ -173,6 +189,7 @@ Limit = 20</pre>
           <td>${obj.make || ""}</td>
           <td>${obj.model || ""}</td>
           <td>${obj.year || ""}</td>
+          <td>${extraHtml.join(" ")}</td>
         `;
         tbody.appendChild(row);
       });
@@ -234,7 +251,7 @@ Limit = 20</pre>
       const data = await res.json();
 
       document.getElementById("schemaResult").innerHTML =
-        `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+        `<pre style="overflow-x: auto; white-space: pre-wrap; background: #f8f9fa; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">${JSON.stringify(data, null, 2)}</pre>`;
     }
 
     async function runBenchmark() {

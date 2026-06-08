@@ -52,7 +52,7 @@ SITES = {
         "host": _SITE1_HOST,
         "flask_host": _FLASK_HOST,
         "port": 5001,
-        "timeout": 5.0,                                           # Timeout 5 giây: Mô phỏng Kho xe tải nằm ở vị trí địa lý rất xa (Độ trễ cao).
+        "timeout": 1.0,                                           # Timeout 1.0s theo yêu cầu
         "class": "Truck",                                         # Chỉ lưu dữ liệu đặc thù của Xe tải (Tải trọng, số trục).
         "db_uri": os.environ.get("DB_URI_1", "postgresql://user:password@localhost:5433/site1_db"),
     },
@@ -61,7 +61,7 @@ SITES = {
         "host": _SITE2_HOST,
         "flask_host": _FLASK_HOST,
         "port": 5002,
-        "timeout": 3.0,                                           # Timeout 3 giây: Mô phỏng Trạm xe điện nằm ở vị trí địa lý vừa phải.
+        "timeout": 1.0,                                           # Timeout 1.0s theo yêu cầu
         "class": "ElectricCar",                                   # Chỉ lưu Pin, tầm hoạt động.
         "db_uri": os.environ.get("DB_URI_2", "postgresql://user:password@localhost:5434/site2_db"),
     },

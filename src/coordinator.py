@@ -159,7 +159,8 @@ class Coordinator:
         """Hàm gõ cửa (Ping) một site xem nó còn thức hay đã sập."""
         try:
             url = self._site_url(site_id, "/ping")
-            resp = self._session.get(url, timeout=2.0)
+            site_timeout = self.sites[site_id].get("timeout", 1.0)
+            resp = self._session.get(url, timeout=site_timeout)
             data = resp.json()
             return True, data.get("site_name", f"Site {site_id}")
         except Exception as exc:
@@ -276,8 +277,17 @@ class Coordinator:
         t_start = time.perf_counter()
         result = QueryResult()
         
+        from src.config import CLASS_SITE
+        
         # Nếu không truyền vào mảng các site cần query, mặc định query tât cả các site
-        sites_to_query = include_sites if include_sites is not None else list(self.sites.keys())
+        if include_sites is not None:
+            sites_to_query = include_sites
+        else:
+            if class_name and class_name != "Vehicle" and class_name in CLASS_SITE:
+                # Tối ưu hóa: Chỉ truy vấn Site 0 (Vehicle base) và Site chứa class_name cụ thể
+                sites_to_query = list(set([0, CLASS_SITE[class_name]]))
+            else:
+                sites_to_query = list(self.sites.keys())
 
         print(f"\n[Coordinator] Đang bắt đầu Tìm kiếm Đa hình (Polymorphic Search)")
         print(f"  Bộ lọc: class={class_name!r}, field={field!r}, op={op!r}, value={value!r}, year_min={year_min}, year_max={year_max}")
@@ -616,7 +626,8 @@ class Coordinator:
         stats = {}
         for site_id in self.sites:
             try:
-                resp = self._session.get(self._site_url(site_id, "/stats"), timeout=2.0)
+                site_timeout = self.sites[site_id].get("timeout", 1.0)
+                resp = self._session.get(self._site_url(site_id, "/stats"), timeout=site_timeout)
                 stats[site_id] = resp.json()
             except Exception as exc:
                 stats[site_id] = {"error": str(exc)}

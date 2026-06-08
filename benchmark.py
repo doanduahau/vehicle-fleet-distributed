@@ -20,7 +20,7 @@ def run_benchmark():
     
     # Số lượng bản ghi để benchmark (thay đổi linh hoạt tùy CSDL)
     object_counts = [10, 25, 50, 100, 250, 500]
-    num_runs = 5
+    num_runs = 2
     
     parallel_fetch_times = []
     rehydration_times = []
