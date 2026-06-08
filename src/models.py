@@ -95,7 +95,7 @@ class VehicleSchema(Schema):
         unknown = INCLUDE
 
     # Thêm nhãn '__class__' để hỗ trợ tính đa hình
-    __class__ = fields.String(dump_default="Vehicle", load_default="Vehicle")
+    cls_name = fields.String(data_key="__class__", attribute="__class__.__name__", dump_only=True)
     oid = OIDField(required=True)
     make = fields.String(required=True)
     model = fields.String(required=True)
@@ -156,7 +156,7 @@ class TruckSchema(VehicleSchema):
     """
     Kế thừa VehicleSchema, bổ sung thêm các cột riêng của Xe tải.
     """
-    __class__ = fields.String(dump_default="Truck", load_default="Truck")
+    cls_name = fields.String(data_key="__class__", attribute="__class__.__name__", dump_only=True)
     payload_capacity_kg = fields.Float(load_default=0.0)
     axle_count = fields.Integer(load_default=2)
     has_trailer = fields.Boolean(load_default=False)
@@ -207,7 +207,7 @@ class ElectricCarSchema(VehicleSchema):
     """
     Kế thừa VehicleSchema, bổ sung thêm các cột riêng của Xe điện.
     """
-    __class__ = fields.String(dump_default="ElectricCar", load_default="ElectricCar")
+    cls_name = fields.String(data_key="__class__", attribute="__class__.__name__", dump_only=True)
     battery_capacity_kwh = fields.Float(load_default=0.0)
     range_km = fields.Integer(load_default=0)
     charge_connector = fields.String(load_default="Unknown")

@@ -11,9 +11,8 @@ Vai trò của file:
     Trong CSDL phân tán, file này đại diện cho "Global Conceptual Schema" và "Fragmentation Schema"
     giúp Điều phối viên (Coordinator) biết phải tìm dữ liệu ở đâu mà không cần hỏi từng máy.
 
-Dựa trên lý thuyết: 
-    Ozsu & Valduriez "Principles of Distributed Database Systems" (4th Ed.)
-    - Chương: Distributed Database Design (Kỹ thuật phân mảnh dọc - Vertical Fragmentation).
+Dựa trên lý thuyết:
+    - Distributed Database Design (Kỹ thuật phân mảnh dọc - Vertical Fragmentation).
 """
 
 import os # Thư viện chuẩn của Python dùng để tương tác với Hệ điều hành (đọc biến môi trường)
@@ -105,3 +104,14 @@ CLASS_HIERARCHY = {
         "attributes": ["oid", "battery_capacity_kwh", "range_km", "charge_connector", "schema_version"], # Dữ liệu Xe điện
     },
 }
+
+# =============================================================================
+# BẢNG TỪ ĐIỂN CHỌN DRIVER SITE CHO QUERY PLANNER
+# =============================================================================
+ATTRIBUTE_SITE = {
+    "make": 0, "model": 0, "year": 0, "vin": 0,
+    "payload_capacity_kg": 1, "axle_count": 1, "has_trailer": 1,
+    "battery_capacity_kwh": 2, "range_km": 2, "charge_connector": 2
+}
+
+CLASS_SITE = {"Vehicle": 0, "Truck": 1, "ElectricCar": 2}

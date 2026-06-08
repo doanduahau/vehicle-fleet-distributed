@@ -7,15 +7,16 @@ Vai trò của file:
     nhúng tay vào PostgreSQL để Lấy/Ghi dữ liệu, rồi gói vào JSON trả về.
 
     Nó cung cấp các API (RESTful):
+Nó cung cấp các API (RESTful):
     - GET  /ping                 : Trả lời "Tôi còn sống".
     - POST /insert               : Ghi dữ liệu vào đĩa cứng (PostgreSQL).
     - GET  /query                : Tìm kiếm dữ liệu trong máy này.
     - POST /schema_evolve        : Cập nhật thêm thuộc tính mới vào tất cả xe trong máy này.
 
 Dựa trên lý thuyết:
-    Özsu & Valduriez "Principles of Distributed Database Systems" (4th Ed.)
-    - Chương 3: Kiến trúc DBMS phân tán.
-    - Mục 10.1: Giao tiếp giữa các site (Inter-site communication).
+    Özsu & Valduriez "Principles of Distributed Database Systems"
+    - Kiến trúc CSDL Phân tán (Distributed DBMS Architecture).
+    - Giao tiếp giữa các site (Inter-site communication).
 """
 
 import json
@@ -60,6 +61,7 @@ class SiteServer:
         
         # Theo dõi lịch sử tiến hóa lược đồ (Để biết CSDL đã được thêm cột gì, lúc nào)
         self._schema_history: List[Dict] = []
+        self.local_schema_version = SCHEMA_VERSION
 
 
         # Khởi tạo Web Server (Flask)
@@ -129,6 +131,19 @@ class SiteServer:
                 conn.commit()
         except Exception as exc:
             print(f"[Site {self.site_id}] LỖI lưu dữ liệu DB: {exc}")
+
+    def _save_one_to_db(self, oid_str: str, obj_data: Dict[str, Any]) -> None:
+        try:
+            with psycopg2.connect(self.db_uri) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO objects (oid, data)
+                        VALUES (%s, %s)
+                        ON CONFLICT (oid) DO UPDATE SET data = EXCLUDED.data
+                    """, (oid_str, json.dumps(obj_data)))
+                conn.commit()
+        except Exception as exc:
+            print(f"[Site {self.site_id}] LỖI lưu object {oid_str}: {exc}")
 
     # ------------------------------------------------------------------
     # CÁC API HTTP (ENDPOINTS) CỦA WORKER NODE
@@ -204,7 +219,7 @@ class SiteServer:
 
             # Ghi vào RAM và ép xuống Đĩa
             self.objects[str(new_oid)] = serialize_object(obj)
-            self._save_to_db()
+            self._save_one_to_db(str(new_oid), self.objects[str(new_oid)])
             return jsonify({"oid": str(new_oid), "status": "inserted"}), 201
 
         @app.route("/objects", methods=["GET"])
@@ -238,10 +253,13 @@ class SiteServer:
             Hỗ trợ POST để truyền mảng OIDs phục vụ Semi-Join.
             """
             # Đọc các tham số tìm kiếm
+            class_name = request.args.get("class_name")
             field = request.args.get("field")
             value = request.args.get("value")
+            op = request.args.get("op", "eq")
             year_min = request.args.get("year_min", type=int)
             year_max = request.args.get("year_max", type=int)
+            offset = request.args.get("offset", 0, type=int)
             
             target_oids = None
             if request.method == "POST":
@@ -257,10 +275,25 @@ class SiteServer:
                 if target_oids and str(obj_data.get("oid")) not in target_oids:
                     match = False
                     
-                if field and value:
-                    obj_val = str(obj_data.get(field, ""))
-                    if obj_val.lower() != value.lower():
+                if field and value is not None:
+                    obj_val = obj_data.get(field)
+                    if obj_val is None:
                         match = False
+                    else:
+                        try:
+                            v1 = float(obj_val)
+                            v2 = float(value)
+                        except (ValueError, TypeError):
+                            v1 = str(obj_val).lower()
+                            v2 = str(value).lower()
+                        
+                        if op == "eq" and v1 != v2: match = False
+                        elif op == "gt" and not (v1 > v2): match = False
+                        elif op == "lt" and not (v1 < v2): match = False
+                        elif op == "gte" and not (v1 >= v2): match = False
+                        elif op == "lte" and not (v1 <= v2): match = False
+                if class_name and obj_data.get("__class__") != class_name:
+                    match = False
                 if year_min and obj_data.get("year", 0) < year_min:
                     match = False
                 if year_max and obj_data.get("year", 0) > year_max:
@@ -270,6 +303,9 @@ class SiteServer:
                 if match:
                     results.append(obj_data)
                     
+            if offset > 0:
+                results = results[offset:]
+                
             limit = request.args.get("limit", type=int)
             if limit and limit > 0:
                 results = results[:limit]
@@ -303,6 +339,8 @@ class SiteServer:
                     obj_data["schema_version"] = new_version
                     updated += 1
 
+            self.local_schema_version = new_version
+
             # Ghi lại lịch sử
             self._schema_history.append({
                 "action": "add_attribute",
@@ -332,7 +370,7 @@ class SiteServer:
                 "site_id": self.site_id,
                 "oid_stats": self.oid_manager.stats(),
                 "object_count": len(self.objects),
-                "schema_version": SCHEMA_VERSION,
+                "schema_version": self.local_schema_version,
             })
 
         # =================================================================
@@ -346,8 +384,10 @@ class SiteServer:
             @app.route("/global/search", methods=["GET"])
             def global_search():
                 """Khi Client (main.py) gọi hàm tìm kiếm, nó sẽ vào đây."""
+                class_name = request.args.get("class_name")
                 field = request.args.get("field")
                 value = request.args.get("value")
+                op = request.args.get("op", "eq")
                 year_min = request.args.get("year_min", type=int)
                 year_max = request.args.get("year_max", type=int)
                 limit = request.args.get("limit", type=int)
@@ -357,9 +397,9 @@ class SiteServer:
                 if sites_arg:
                     include_sites = [int(s) for s in sites_arg.split(",")]
 
-                # Chuyển lệnh tìm kiếm này cho Coordinator giải quyết (Xem Coordinator_engine.py)
+                # Chuyển lệnh tìm kiếm này cho Coordinator giải quyết
                 result = self.coordinator_engine.polymorphic_search(
-                    field=field, value=value, year_min=year_min, year_max=year_max, limit=limit, include_sites=include_sites
+                    class_name=class_name, field=field, value=value, op=op, year_min=year_min, year_max=year_max, limit=limit, include_sites=include_sites
                 )
                 
                 return jsonify({
@@ -367,6 +407,7 @@ class SiteServer:
                     "timing": result.timing,
                     "errors": result.errors,
                     "rehydration_count": result.rehydration_count,
+                    "rehydration_by_site": result.rehydration_by_site,
                     "total_time": result.total_time,
                     "summary_text": result.summary()
                 })

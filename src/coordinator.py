@@ -15,9 +15,8 @@ Các nhiệm vụ cốt lõi:
     4. Tiến hóa Lược đồ (Schema Evolution): Phát lệnh thêm cột dữ liệu tới toàn mạng.
 
 Dựa trên lý thuyết:
-    Özsu & Valduriez "Principles of Distributed Database Systems" (4th Ed.)
-    - Chương 10: Xử lý truy vấn (Query Processing) - Cơ chế Fan-out (Tỏa nhánh) và Join.
-    - Chương 12: Object Rehydration.
+    - Xử lý truy vấn phân tán (Distributed Query Processing) - Cơ chế Fan-out (Tỏa nhánh) và Join.
+    - Phục hồi đối tượng (Object Rehydration) trong cơ sở dữ liệu hướng đối tượng phân tán.
 """
 
 import concurrent.futures # Thư viện Xử lý đa luồng (Multi-threading) - Quan trọng để gọi các Site cùng lúc
@@ -54,6 +53,7 @@ class QueryResult:
         self.timing: Dict[str, float] = {}           # site_id -> Số giây tốn để lấy dữ liệu
         self.errors: Dict[int, str] = {}             # site_id -> Câu thông báo lỗi (Nếu Site bị sập)
         self.rehydration_count: int = 0              # Đếm số lần phải khâu/ghép (Join) 2 nửa đối tượng
+        self.rehydration_by_site: Dict[int, int] = {1: 0, 2: 0} # Phục hồi theo từng site
         self.total_time: float = 0.0                 # Tổng thời gian từ lúc bấm tới lúc hiện ra
 
     def summary(self) -> str:
@@ -64,10 +64,17 @@ class QueryResult:
             "=" * 60,
             f"  Tổng số đối tượng tìm thấy : {len(self.objects)}",
             f"  Số đối tượng được phục hồi : {self.rehydration_count} (cần kết hợp xuyên site)",
+            "  Phục hồi theo từng site:",
             f"  Tổng thời gian (wall-clock) : {self.total_time:.3f}s",
             "",
             "  Thời gian trễ mạng (Network Latency) từng site:",
         ]
+        for site_id, count in self.rehydration_by_site.items():
+            name = SITES.get(site_id, {}).get("name", f"Site {site_id}")
+            lines.append(f"    {name}: {count} đối tượng")
+            
+        lines.append("")
+        lines.append("  Thời gian trễ mạng (Network Latency) từng site:")
         # In ra thời gian trễ của từng Site
         for site_id, t in self.timing.items():
             name = SITES.get(int(site_id), {}).get("name", f"Site {site_id}")
@@ -173,11 +180,14 @@ class Coordinator:
     def _fetch_from_site(
         self,
         site_id: int,
+        class_name: Optional[str] = None,
         field: Optional[str] = None,
         value: Optional[str] = None,
+        op: Optional[str] = None,
         year_min: Optional[int] = None,
         year_max: Optional[int] = None,
         limit: Optional[int] = None,
+        offset: Optional[int] = None,
         oids: Optional[List[str]] = None,
     ) -> Tuple[int, List[Dict], float, Optional[str]]:
         """
@@ -186,17 +196,20 @@ class Coordinator:
         """
         t0 = time.perf_counter() # Bấm đồng hồ bắt đầu
         
-        # Lấy thời gian Timeout từ cấu hình (Site xa thì Timeout dài hơn)
         site_timeout = self.sites[site_id].get("timeout", 2.0)
         
         try:
             # Gói ghém các điều kiện tìm kiếm vào URL Params
+            # Lưu ý: Không truyền class_name xuống Site để tránh Site lọc sai. 
+            # Việc lọc class_name sẽ được Coordinator thực hiện ở bước Final Filter.
             params = {}
             if field: params["field"] = field
-            if value: params["value"] = value
+            if value is not None: params["value"] = value
+            if op: params["op"] = op
             if year_min: params["year_min"] = year_min
             if year_max: params["year_max"] = year_max
             if limit: params["limit"] = limit
+            if offset: params["offset"] = offset
 
             if oids is not None:
                 url = self._site_url(site_id, "/query")
@@ -233,13 +246,21 @@ class Coordinator:
             print(f"  [NETWORK LOG] LỖI KHÔNG XÁC ĐỊNH tại Site {site_id}: {exc}")
             return site_id, [], elapsed, str(exc)
 
-    # -------------------------------------------------------------------------
-    # HÀM CHÍNH - TÌM KIẾM ĐA HÌNH VÀ PHỤC HỒI (POLYMORPHIC REHYDRATION)
-    # -------------------------------------------------------------------------
+    def choose_driver_site(self, class_name: Optional[str], field: Optional[str]) -> int:
+        from src.config import ATTRIBUTE_SITE, CLASS_SITE
+        
+        if field in ATTRIBUTE_SITE:
+            return ATTRIBUTE_SITE[field]
+        if class_name in CLASS_SITE:
+            return CLASS_SITE[class_name]
+        return 0
+
     def polymorphic_search(
         self,
+        class_name: Optional[str] = None,
         field: Optional[str] = None,
         value: Optional[str] = None,
+        op: Optional[str] = None,
         year_min: Optional[int] = None,
         year_max: Optional[int] = None,
         limit: Optional[int] = None,
@@ -258,42 +279,104 @@ class Coordinator:
         sites_to_query = include_sites if include_sites is not None else list(self.sites.keys())
 
         print(f"\n[Coordinator] Đang bắt đầu Tìm kiếm Đa hình (Polymorphic Search)")
-        print(f"  Bộ lọc: field={field!r}, value={value!r}, year_min={year_min}, year_max={year_max}")
+        print(f"  Bộ lọc: class={class_name!r}, field={field!r}, op={op!r}, value={value!r}, year_min={year_min}, year_max={year_max}")
         print(f"  Các Site truy vấn: {sites_to_query}")
 
         site_data: Dict[int, List[Dict]] = {}
+        driver_site = self.choose_driver_site(class_name, field)
         
-        if limit and 0 in sites_to_query:
-            print(f"  Chiến lược: Bán kết nối (Semi-Join) do có điều kiện LIMIT={limit}\n")
+        if limit and driver_site in sites_to_query:
+            print(f"  Chiến lược: Bán kết nối (Semi-Join) phân lô (Batching) do có LIMIT={limit}. Driver Site: Site {driver_site}\n")
             
-            # BƯỚC 1: Lấy dữ liệu cơ sở (Base Fragments) từ Site 0
-            sid, objects, elapsed, error = self._fetch_from_site(0, field, value, year_min, year_max, limit=limit)
-            result.timing[0] = elapsed
-            if error:
-                result.errors[0] = error
-                print(f"  [WARN] Site 0: {error}")
-            else:
-                site_data[0] = objects
-                target_oids = [obj.get("oid") for obj in objects if "oid" in obj]
-                print(f"  [OK]   Site 0 (Driver): Tìm thấy {len(target_oids)} OIDs gốc [{elapsed:.3f}s]")
+            collected_objects = []
+            offset = 0
+            # Lấy dư ra một chút (batch_size) để bù hao hụt sau khi filter
+            batch_size = limit * 3 if (class_name and driver_site == 0) else limit
+            
+            while len(collected_objects) < limit:
+                # BƯỚC 1: Lấy dữ liệu từ Driver Site
+                sid, objects, elapsed, error = self._fetch_from_site(driver_site, class_name, field, value, op, year_min, year_max, limit=batch_size, offset=offset)
+                result.timing[driver_site] = result.timing.get(driver_site, 0.0) + elapsed
                 
-                # BƯỚC 2: Fetch song song từ Site 1 và 2, nhưng CHỈ LẤY CÁC OID đã khớp
-                other_sites = [s for s in sites_to_query if s != 0]
+                if error:
+                    result.errors[driver_site] = error
+                    print(f"  [WARN] Driver Site {driver_site}: {error}")
+                    break
+                    
+                if not objects:
+                    break # Hết dữ liệu ở Driver Site
+                    
+                site_data_batch = {driver_site: objects}
+                target_oids = [obj.get("oid") for obj in objects if "oid" in obj]
+                print(f"  [OK]   Driver Site {driver_site}: Tìm thấy {len(target_oids)} OIDs gốc [{elapsed:.3f}s] (Offset: {offset})")
+                
+                # BƯỚC 2: Fetch song song từ các site còn lại
+                other_sites = [s for s in sites_to_query if s != driver_site]
                 if target_oids and other_sites:
                     with concurrent.futures.ThreadPoolExecutor(max_workers=len(other_sites)) as executor:
                         futures = {
-                            executor.submit(self._fetch_from_site, sid, None, None, None, None, None, target_oids): sid
-                            for sid in other_sites
+                            executor.submit(self._fetch_from_site, s, None, None, None, None, None, None, None, None, target_oids): s
+                            for s in other_sites
                         }
                         for future in concurrent.futures.as_completed(futures):
-                            sid, obj_list, elap, err = future.result()
-                            result.timing[sid] = elap
+                            s, obj_list, elap, err = future.result()
+                            result.timing[s] = result.timing.get(s, 0.0) + elap
                             if err:
-                                result.errors[sid] = err
-                                print(f"  [WARN] Site {sid}: {err} [{elap:.3f}s]")
+                                result.errors[s] = err
+                                print(f"  [WARN] Site {s}: {err} [{elap:.3f}s]")
                             else:
-                                site_data[sid] = obj_list
-                                print(f"  [OK]   Site {sid}: Lấy {len(obj_list)} mảnh mở rộng [{elap:.3f}s]")
+                                site_data_batch[s] = obj_list
+                                print(f"  [OK]   Site {s}: Lấy {len(obj_list)} mảnh mở rộng [{elap:.3f}s]")
+                
+                # BƯỚC 3: Rehydrate (Khâu các mảnh lại với nhau) cho batch hiện tại
+                subclass_by_oid = {}
+                for s in [1, 2]:
+                    for obj_data in site_data_batch.get(s, []):
+                        oid_str = obj_data.get("oid", "")
+                        if oid_str: subclass_by_oid[oid_str] = (s, obj_data)
+
+                batch_rehydrated = []
+                for base_data in site_data_batch.get(0, []):
+                    oid_str = base_data.get("oid", "")
+                    if oid_str in subclass_by_oid:
+                        source_site, subclass_data = subclass_by_oid[oid_str]
+                        merged = {**base_data, **subclass_data}
+                        result.rehydration_count += 1
+                        result.rehydration_by_site[source_site] = result.rehydration_by_site.get(source_site, 0) + 1
+                    else:
+                        merged = base_data
+
+                    try:
+                        obj = deserialize_object(merged)
+                        batch_rehydrated.append(obj)
+                    except Exception:
+                        pass
+
+                base_oids = {d.get("oid") for d in site_data_batch.get(0, [])}
+                for s in [1, 2]:
+                    for obj_data in site_data_batch.get(s, []):
+                        oid_str = obj_data.get("oid", "")
+                        if oid_str not in base_oids:
+                            try:
+                                obj = deserialize_object(obj_data)
+                                batch_rehydrated.append(obj)
+                            except Exception:
+                                pass
+                                
+                # BƯỚC 4: Lọc Final Class cho batch
+                if class_name:
+                    batch_rehydrated = [obj for obj in batch_rehydrated if obj.__class__.__name__ == class_name]
+                    
+                collected_objects.extend(batch_rehydrated)
+                print(f"  [BATCH] Đã tích lũy được {len(collected_objects)}/{limit} đối tượng thỏa mãn...")
+                
+                offset += batch_size
+                if len(objects) < batch_size:
+                    break # Không còn dữ liệu ở site gốc để lấy thêm
+                    
+            result.objects = collected_objects[:limit]
+            result.total_time = time.perf_counter() - t_start
+            return result
         else:
             print(f"  Chiến lược: Tỏa nhánh SONG SONG (Parallel Fan-out) vì không có LIMIT\n")
             
@@ -301,21 +384,17 @@ class Coordinator:
             # BƯỚC 1: TỎA NHÁNH SONG SONG (Parallel Fan-out Execution)
             # ------------------------------------------------------------------
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(sites_to_query)) as executor:
-                # Phóng các luồng đi...
                 futures = {
-                    executor.submit(self._fetch_from_site, sid, field, value, year_min, year_max, None): sid
+                    executor.submit(self._fetch_from_site, sid, class_name, field, value, op, year_min, year_max, None): sid
                     for sid in sites_to_query
                 }
-                # Thu gom kết quả khi các luồng trả về
                 for future in concurrent.futures.as_completed(futures):
                     sid, objects, elapsed, error = future.result()
                     result.timing[sid] = elapsed
                     if error:
-                        # Ghi nhận lỗi nếu site bị tèo
                         result.errors[sid] = error
                         print(f"  [WARN] Site {sid} ({self.sites[sid]['name']}): {error} [{elapsed:.3f}s]")
                     else:
-                        # Ghi nhận dữ liệu thành công
                         site_data[sid] = objects
                         print(f"  [OK]   Site {sid} ({self.sites[sid]['name']}): {len(objects)} đối tượng [{elapsed:.3f}s]")
 
@@ -331,7 +410,7 @@ class Coordinator:
             for obj_data in site_data.get(sid, []):
                 oid_str = obj_data.get("oid", "")
                 if oid_str:
-                    subclass_by_oid[oid_str] = obj_data
+                    subclass_by_oid[oid_str] = (sid, obj_data)
 
         # 2.2 Quét qua Lớp cha (Site 0), lấy OID đối chiếu sang lớp con
         for base_data in site_data.get(0, []):
@@ -339,8 +418,10 @@ class Coordinator:
             if oid_str in subclass_by_oid:
                 # NẾU KHỚP OID: Gộp 2 cái từ điển Dictionary lại làm 1 bằng cú pháp {**a, **b}
                 print(f"  [REHYDRATION LOG] Đang join dữ liệu qua mạng cho OID={oid_str}...")
-                merged = {**base_data, **subclass_by_oid[oid_str]}
+                source_site, subclass_data = subclass_by_oid[oid_str]
+                merged = {**base_data, **subclass_data}
                 result.rehydration_count += 1
+                result.rehydration_by_site[source_site] = result.rehydration_by_site.get(source_site, 0) + 1
             else:
                 # Nếu không khớp thì đây chỉ là chiếc Vehicle bình thường
                 merged = base_data
@@ -353,7 +434,6 @@ class Coordinator:
                 print(f"  [WARN] Không thể tái cấu trúc đối tượng {oid_str}: {exc}")
 
         # Đồng thời bao gồm các đối tượng lớp con không có dữ liệu cơ sở tại Site 0
-        # (Điều này xử lý trường hợp Site 0 bị ngoại tuyến hoặc tìm kiếm bộ lọc không thỏa mãn ở lớp cha nhưng có ở con)
         base_oids = {d.get("oid") for d in site_data.get(0, [])}
         for sid in [1, 2]:
             for obj_data in site_data.get(sid, []):
@@ -364,6 +444,12 @@ class Coordinator:
                         result.objects.append(obj)
                     except Exception:
                         pass
+                        
+        # ------------------------------------------------------------------
+        # BƯỚC 4: LỌC CUỐI THEO CLASS VÀ LIMIT (Final filtering)
+        # ------------------------------------------------------------------
+        if class_name:
+            result.objects = [obj for obj in result.objects if obj.__class__.__name__ == class_name]
 
         if limit and limit > 0:
             result.objects = result.objects[:limit]

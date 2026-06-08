@@ -17,7 +17,7 @@ def run_benchmark():
     print("=" * 65)
     
     # Số lượng bản ghi để benchmark (thay đổi linh hoạt tùy CSDL)
-    object_counts = [10, 50, 100, 500, 1000, 1500]
+    object_counts = [10, 25, 50, 100, 250, 500]
     num_runs = 5
     
     parallel_fetch_times = []

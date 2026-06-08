@@ -20,9 +20,8 @@ Nguồn dữ liệu thực tế:
         Tải trọng & thông số được sinh theo đúng phân nhóm GVWR chuẩn quốc tế.
 
 Dựa trên lý thuyết:
-    Özsu & Valduriez "Principles of Distributed Database Systems" (4th Ed.)
-    - Chương 4: Phân mảnh dữ liệu (Fragmentation)
-    - Mục 4.3: Phân mảnh dọc (Vertical Fragmentation) - Cắt dọc một bảng theo cột.
+    - Phân mảnh dữ liệu (Data Fragmentation)
+    - Phân mảnh dọc (Vertical Fragmentation) - Cắt dọc một bảng theo cột.
 """
 
 import json
@@ -144,10 +143,9 @@ def fetch_ev_data():
             "model": model,
             "year":  int(year),
             "vin":   f"BEV{random.randint(10000000000000, 99999999999999)}",
-            # Thông tin phân mảnh dọc (Sẽ bơm sang Site 2)
-            "_ev_battery": round(float(battery), 1),
-            "_ev_range":   int(ev_range),
-            "_ev_connector": connector,
+            "battery_capacity_kwh": round(float(battery), 1),
+            "range_km":   int(ev_range),
+            "charge_connector": connector,
         })
     
     print(f"  Sau khi làm sạch (Transform): {len(cleaned)} bản ghi hợp lệ.")
@@ -211,9 +209,9 @@ def fetch_truck_data(count=500):
             "model": model,
             "year":  int(year),
             "vin":   f"TRK{random.randint(10000000000000, 99999999999999)}",
-            "_truck_payload":     round(float(payload), 1),
-            "_truck_axles":       axle_count,
-            "_truck_has_trailer": has_trailer,
+            "payload_capacity_kg":     round(float(payload), 1),
+            "axle_count":       axle_count,
+            "has_trailer": has_trailer,
         })
 
     print(f"  Sau khi làm sạch (Transform): {len(cleaned)} bản ghi hợp lệ.")
@@ -248,27 +246,27 @@ def seed_all():
     if not ev_records:
         ev_records = [
             {"make": "Tesla",   "model": "Model 3", "year": 2023, "vin": f"BEV{i:014d}",
-             "_ev_battery": 82.0, "_ev_range": 576, "_ev_connector": "Tesla/NACS"}
-            for i in range(700)
+             "battery_capacity_kwh": 82.0, "range_km": 576, "charge_connector": "Tesla/NACS"}
+            for i in range(200)
         ]
 
-    truck_records = fetch_truck_data(count=500)
+    truck_records = fetch_truck_data(count=150)
     # Nếu không tải được từ Internet, dùng dữ liệu dự phòng
     if not truck_records:
         truck_records = [
             {"make": "Ford", "model": "F-250", "year": 2020, "vin": f"TRK{i:014d}",
-             "_truck_payload": 3000.0, "_truck_axles": 4, "_truck_has_trailer": True}
-            for i in range(500)
+             "payload_capacity_kg": 3000.0, "axle_count": 4, "has_trailer": True}
+            for i in range(150)
         ]
     base_records = [
         {"make": m, "model": mo, "year": random.randint(2010, 2024), "vin": f"BAS{random.randint(10000000000000, 99999999999999)}"}
         for m, mo in [("Toyota","Camry"),("Honda","Civic"),("Ford","Escape"),("Mazda","CX-5"),("Subaru","Outback")]
-        for _ in range(60)  # 5 hãng x 60 = 300 xe dân dụng
+        for _ in range(30)  # 5 hãng x 30 = 150 xe dân dụng
     ]
     
-    # Giới hạn xe điện tối đa 700 bản ghi (lấy ngẫu nhiên từ dataset thực)
+    # Giới hạn xe điện tối đa 200 bản ghi (lấy ngẫu nhiên từ dataset thực)
     random.shuffle(ev_records)
-    ev_records = ev_records[:700]
+    ev_records = ev_records[:200]
     
     all_vehicles = truck_records + ev_records + base_records
     total = len(all_vehicles)
@@ -280,8 +278,13 @@ def seed_all():
     print(f"\n[Site 0] Bơm {total} bản ghi Khung gầm cơ sở (Base Schema)...")
     oids_site0 = []
     for idx, v in enumerate(all_vehicles):
-        # Chỉ gửi thông tin Base Schema — KHÔNG gửi các trường "_ev_*", "_truck_*"
-        base_data = {k: v for k, v in v.items() if not k.startswith("_")}
+        # Phân mảnh dọc (Vertical Fragmentation): Site 0 chỉ chứa thông tin định danh dùng chung
+        base_data = {
+            "make": v.get("make"),
+            "model": v.get("model"),
+            "year": v.get("year"),
+            "vin": v.get("vin")
+        }
         oid = insert(0, base_data)
         oids_site0.append(oid)
         if (idx + 1) % 200 == 0:
@@ -298,13 +301,13 @@ def seed_all():
         if not oid:
             continue
         insert(1, {
-            "__class__": "Truck",
             "oid": oid,
+            "__class__": "Truck",
             "make":  truck["make"],  "model": truck["model"],
             "year":  truck["year"],  "vin":   truck["vin"],
-            "payload_capacity_kg": truck["_truck_payload"],
-            "axle_count":          truck["_truck_axles"],
-            "has_trailer":         truck["_truck_has_trailer"],
+            "payload_capacity_kg": truck.get("payload_capacity_kg"),
+            "axle_count": truck.get("axle_count"),
+            "has_trailer": truck.get("has_trailer"),
         })
         if (idx + 1) % 100 == 0:
             print(f"  ... {idx + 1}/{len(truck_records)}")
@@ -320,13 +323,13 @@ def seed_all():
         if not oid:
             continue
         insert(2, {
-            "__class__": "ElectricCar",
             "oid": oid,
+            "__class__": "ElectricCar",
             "make":  ev["make"],  "model": ev["model"],
             "year":  ev["year"],  "vin":   ev["vin"],
-            "battery_capacity_kwh": ev["_ev_battery"],
-            "range_km":             ev["_ev_range"],
-            "charge_connector":     ev["_ev_connector"],
+            "battery_capacity_kwh": ev.get("battery_capacity_kwh"),
+            "range_km": ev.get("range_km"),
+            "charge_connector": ev.get("charge_connector"),
         })
         if (idx + 1) % 100 == 0:
             print(f"  ... {idx + 1}/{len(ev_records)}")

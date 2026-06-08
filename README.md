@@ -12,11 +12,11 @@ Implements **Distributed Inheritance Handling** for a Vehicle Fleet system acros
 
 | Concept | Implementation | Özsu & Valduriez Reference |
 |---|---|---|
-| **OID Management** | Structured OIDs `site.class.seq`, collision-free | Object Identity |
+| **OID Management** | Anchored at base fragment (Site 0), reused by subclasses for join | Object Identity |
 | **Complexity Handling** | `Vehicle → Truck`, `Vehicle → ElectricCar` hierarchy | The Object Model |
 | **Network Awareness** | Measures per-site fetch time + rehydration overhead | Distributed Object Queries |
 | **Serialization** | JSON roundtrip with schema version tracking | Object Serialization |
-| **Garbage Collection** | Reference counting hooks on all objects | Garbage Collection |
+| **Garbage Collection** | Reference metadata hooks on all objects | Garbage Collection |
 | **Schema Evolution** | Broadcast attribute additions + lazy migration | Schema Evolution |
 
 ---
@@ -47,19 +47,36 @@ Implements **Distributed Inheritance Handling** for a Vehicle Fleet system acros
 ```bash
 # 1. Build & start all 3 site containers
 docker compose up --build -d
+```
 
-# 2. Seed data into all sites
-docker compose --profile seed run seeder
+### 2. Bơm Dữ Liệu Thực Tế (Seed Data)
 
-# 3. Run interactive demo (from your local machine)
+> **Lưu ý:** Nếu chạy lại lệnh này nhiều lần, dữ liệu sẽ cộng dồn. Để reset trắng dữ liệu, hãy chạy `docker compose down -v` trước.
+
+```bash
+docker compose --profile seed run --rm seeder
+# Hoặc chạy script nội bộ trên Windows:
+# python setup/seed_data.py
+```
+
+### 3. Chạy Client (Tương tác với hệ thống)
+
+```bash
 pip install -r requirements.txt
 python main.py
+```
 
-# 4. Demo site failure: kill Site 1 then run option [7] in main.py
+### 4. Demo site failure
+
+```bash
+# kill Site 1 then run option [7] in main.py
 docker compose stop site1
 python main.py    # -> option [7]
+```
 
-# 5. Bring Site 1 back
+### 5. Bring Site 1 back
+
+```bash
 docker compose start site1
 ```
 
@@ -110,10 +127,10 @@ Docker makes each "site" truly autonomous (Site Autonomy), not just a different 
 | [3] | Filter by make (e.g., Tesla) | Distributed Query |
 | [4] | Filter by year range | Distributed Query |
 | [5] | Rehydration cost: Site-0-only vs. all sites | Distributed Object Queries |
-| [6] | Add attribute to Vehicle → propagate all sites | Eventual Schema Evolution |
-| [7] | Site failure: query Sites 0+2 only (Truck offline) | Availability |
-| [8] | Serialization roundtrip + old schema migration | Object Serialization |
-| [9] | OID manager stats per site | Object Identity |
+| [6] | Benchmark scaling performance | Parallel Execution & Network Scaling |
+| [7] | Add attribute to Vehicle → propagate all sites | Eventual Schema Evolution |
+| [8] | OID manager stats per site | Object Identity |
+| [9] | Distributed Query Planner (Semi-Join) | Distributed Query Optimization |
 
 ---
 
@@ -121,9 +138,9 @@ Docker makes each "site" truly autonomous (Site Autonomy), not just a different 
 
 | Site | Container | Class | Records |
 |---|---|---|---|
-| Site 0 | `vf_site0` | Vehicle | 15 base records |
-| Site 1 | `vf_site1` | Truck | 6 fragment records |
-| Site 2 | `vf_site2` | ElectricCar | 5 fragment records |
+| Site 0 | `vf_site0` | Vehicle | ~500 base records |
+| Site 1 | `vf_site1` | Truck | ~150 Truck fragment records |
+| Site 2 | `vf_site2` | ElectricCar | ~200 ElectricCar fragment records |
 
 Brands: Volvo, Mercedes, MAN, Scania, DAF, IVECO (Trucks) + Tesla, BYD, Hyundai, Rivian (EVs) + Toyota, Ford, VW, Renault (base only)
 

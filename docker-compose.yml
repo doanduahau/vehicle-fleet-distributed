@@ -3,7 +3,7 @@
 # =============================================================================
 # Mô phỏng 3 sites vật lý độc lập trên cùng máy host.
 #
-# Lý do dùng Docker (Özsu & Valduriez §3.3 — Site Autonomy):
+# Lý do dùng Docker (Distributed Database Design - Site Autonomy):
 #   - Mỗi container có network namespace riêng → sites thực sự cô lập
 #   - Giao tiếp qua tên service DNS (site0, site1, site2) thay vì localhost
 #   - Dữ liệu mỗi site trong volume riêng → local autonomy
@@ -34,6 +34,8 @@ services:
       DB_URI_0: "postgresql://user:password@pg_site0:5432/site0_db"
     ports:
       - "5000:5000"          # Host:Container — truy cập từ ngoài
+    volumes:
+      - ./data:/app/data     # Mount schema registry data
     depends_on:
       pg_site0:
         condition: service_healthy

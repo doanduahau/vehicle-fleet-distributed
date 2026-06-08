@@ -54,6 +54,7 @@ MENU = """
   [6] Chạy Benchmark hiệu năng & Xuất biểu đồ (Performance Graph)
   [7] Tiến hóa Lược đồ (Schema Evolution) -- Thêm thuộc tính mới
   [8] Khảo sát Hệ thống qua Master Node (Xem thống kê)
+  [9] Demo Bộ lập kế hoạch truy vấn (Query Planner & Semi-Join)
   [0] Thoát
 ---------------------------------------------
 """
@@ -259,6 +260,37 @@ def demo_oid_stats():
                 print(f"    Bộ đếm OID  : {data.get('oid_stats', {})}")
 
 
+def demo_query_planner():
+    """Chức năng 9: Trình diễn khả năng của Distributed Query Planner."""
+    print("\n[BỘ LẬP KẾ HOẠCH TRUY VẤN - QUERY PLANNER]")
+    print("  Demo khả năng chọn đúng Driver Site và áp dụng Semi-Join tối ưu.")
+    
+    print("\n  Hãy thử một số kịch bản:")
+    print("  - class_name=Truck, field=make, value=Volvo (Giao việc cho Site 0 làm Driver, sau đó filter ra Truck)")
+    print("  - class_name=ElectricCar, field=battery_capacity_kwh, value=80, op=gt (Giao việc cho Site 2 làm Driver)")
+    print("  - class_name=Vehicle, field=make, value=Tesla (Site 0 làm Driver, lọc lấy tất cả dòng xe của Tesla)")
+    
+    class_name = input("\n  Lớp xe (Vehicle/Truck/ElectricCar) [Bỏ qua nếu tìm đa hình]: ").strip()
+    field = input("  Trường cần lọc (vd: make, payload_capacity_kg): ").strip()
+    value = input("  Giá trị cần so sánh (vd: Volvo, 80): ").strip()
+    op = input("  Toán tử (eq/gt/lt/gte/lte) [Mặc định: eq]: ").strip() or "eq"
+    limit = input("  Giới hạn số lượng (vd: 10) [Mặc định: 10]: ").strip() or "10"
+    
+    params = {}
+    if class_name: params["class_name"] = class_name
+    if field: params["field"] = field
+    if value: params["value"] = value
+    if op: params["op"] = op
+    try: params["limit"] = int(limit)
+    except: params["limit"] = 10
+    
+    print(f"\n  Gửi Request: {params}")
+    data = get_global("/global/search", params)
+    if data:
+        print_objects(data["objects"])
+        print("\n" + data.get("summary_text", ""))
+
+
 # =============================================================================
 # HÀM MAIN (HÀM CHÍNH ĐIỀU HƯỚNG VÒNG LẶP MENU)
 # =============================================================================
@@ -277,6 +309,7 @@ def main():
         "6": demo_benchmark,
         "7": demo_schema_evolution,
         "8": demo_oid_stats,
+        "9": demo_query_planner,
     }
 
     # Vòng lặp chương trình
