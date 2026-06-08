@@ -8,3 +8,10 @@ venv/
 .env
 .venv
 *.sqlite3
+
+# Generated Output
+benchmark_results.*
+seeder_out.txt
+
+# Databases and Registry
+data/
