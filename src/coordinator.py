@@ -252,7 +252,7 @@ class Coordinator:
         
         if field in ATTRIBUTE_SITE:
             return ATTRIBUTE_SITE[field]
-        if class_name in CLASS_SITE:
+        if class_name and class_name != "Vehicle" and class_name in CLASS_SITE:
             return CLASS_SITE[class_name]
         return 0
 
@@ -363,7 +363,7 @@ class Coordinator:
                                 pass
                                 
                 # BƯỚC 4: Lọc Final Class cho batch
-                if class_name:
+                if class_name and class_name != "Vehicle":
                     batch_rehydrated = [obj for obj in batch_rehydrated if obj.__class__.__name__ == class_name]
                     
                 collected_objects.extend(batch_rehydrated)
@@ -453,7 +453,7 @@ class Coordinator:
         # ------------------------------------------------------------------
         # BƯỚC 4: LỌC CUỐI THEO CLASS VÀ LIMIT (Final filtering)
         # ------------------------------------------------------------------
-        if class_name:
+        if class_name and class_name != "Vehicle":
             result.objects = [obj for obj in result.objects if obj.__class__.__name__ == class_name]
 
         if limit and limit > 0:

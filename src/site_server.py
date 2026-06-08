@@ -410,6 +410,7 @@ class SiteServer:
                 
                 return jsonify({
                     "objects": [serialize_object(obj) for obj in result.objects],
+                    "count": len(result.objects),
                     "timing": result.timing,
                     "errors": result.errors,
                     "rehydration_count": result.rehydration_count,

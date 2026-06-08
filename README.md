@@ -16,7 +16,7 @@ Implements **Distributed Inheritance Handling** for a Vehicle Fleet system acros
 | **Complexity Handling** | `Vehicle → Truck`, `Vehicle → ElectricCar` hierarchy | The Object Model |
 | **Network Awareness** | Measures per-site fetch time + rehydration overhead | Distributed Object Queries |
 | **Serialization** | JSON roundtrip with schema version tracking | Object Serialization |
-| **Garbage Collection** | Reference metadata hooks on all objects | Garbage Collection |
+| **Reference Metadata** | Reference counters/hooks for future GC | Garbage Collection |
 | **Schema Evolution** | Broadcast attribute additions + lazy migration | Schema Evolution |
 
 ---
@@ -69,9 +69,9 @@ python main.py
 ### 4. Demo site failure
 
 ```bash
-# kill Site 1 then run option [7] in main.py
 docker compose stop site1
-python main.py    # -> option [7]
+python main.py
+# chạy option [2], [3], [4] hoặc [9] để thấy hệ thống vẫn trả kết quả từ các site còn sống
 ```
 
 ### 5. Bring Site 1 back
